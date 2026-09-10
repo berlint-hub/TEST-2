@@ -1547,7 +1547,10 @@ bool InitializeUsb(std::string* error)
 
   // Register before starting the libusbhsfs manager. Registering afterwards
   // can wait behind device enumeration while a caller holds launcher locks.
-  usbHsFsSetFileSystemMountFlags(UsbHsFsMountFlags_None);
+  // Replay an unclean NTFS journal and list hidden game folders. FAT and exFAT
+  // ignore both flags.
+  usbHsFsSetFileSystemMountFlags(UsbHsFsMountFlags_ReplayJournal |
+                                 UsbHsFsMountFlags_ShowHiddenFiles);
   usbHsFsSetPopulateCallback(UsbStatusChanged, nullptr);
   const Result result = usbHsFsInitialize(0);
   if (R_FAILED(result))

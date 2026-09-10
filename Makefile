@@ -71,7 +71,8 @@ ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) $(LTOFLAGS) -Wl,-Map,$(notdir $*.map)
 
 STORAGE_LIBS := $(TOPDIR)/launcher/dependencies/build/_deps/libsmb2-build/lib/libsmb2.a \
-				$(TOPDIR)/launcher/dependencies/build/_deps/libusbhsfs-build/liblibusbhsfs.a
+				$(TOPDIR)/launcher/dependencies/build/_deps/libusbhsfs-build/liblibusbhsfs.a \
+				$(PORTLIBS)/lib/libntfs-3g.a
 
 # nx: libnx (audren for the AAudio shim, HID, applet, fs). m: libm. No SDL2/
 # OpenSL ES -- audio is the in-tree AAudio->audren shim (source/aaudio.c).
@@ -211,7 +212,8 @@ else
 $(OUTPUT).nro	:	$(OUTPUT).elf
 endif
 
-$(OUTPUT).elf	:	$(OFILES)
+# Relink when the prebuilt storage archives change, not only on source edits.
+$(OUTPUT).elf	:	$(OFILES) $(STORAGE_LIBS)
 
 $(OFILES_SRC)	: $(HFILES_BIN)
 

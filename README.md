@@ -16,7 +16,8 @@ and each build's data files, and extracts the ones you pick to the SD card at
 launch. An SDL cover-art launcher chooses the game, the renderer, and per-game
 settings, then chainloads the emulator.
 
-The launcher supports multiple library folders across SD, USB mass storage, and SMB shares.
+The launcher supports multiple library folders across SD, USB mass storage
+(FAT32, exFAT, NTFS), and SMB shares.
 
 **L + R + Plus** to open the quick menu for save states, controller rebinding,
 selectable per-game PNACH cheat codes, RetroAchievements progress,
@@ -77,7 +78,8 @@ Install the devkitPro Switch toolchain and portlibs:
 
 ```sh
 pacman -S devkitA64 switch-tools libnx switch-sdl2 switch-sdl2_ttf \
-          switch-sdl2_image switch-curl switch-mesa switch-libdrm_nouveau
+          switch-sdl2_image switch-curl switch-mesa switch-libdrm_nouveau \
+          switch-ntfs-3g
 ```
 
 Provide a compatible Mesa NVK package under `vulkan/include` and `vulkan/lib`.
