@@ -4433,8 +4433,9 @@ static void optAdjust(const Opt &o, int dir) {
 // Status rows report a measured fact, so they paint their own verdict colour.
 // Returns false for rows that follow the normal selection colours.
 static bool optValueVerdictColor(const Opt &o, SDL_Color *out) {
-  if(o.type!=OT_STATUS || !o.key || strcmp(o.key,"cpu-cores")) return false;
-  *out = allowedCpuCores()>=4 ? (SDL_Color){120,215,130,255} : (SDL_Color){235,125,125,255};
+  if(o.type!=OT_STATUS) return false;
+  const bool ok = o.key && !strcmp(o.key,"cpu-cores") ? allowedCpuCores()>=4 : lsfgDllInstalled();
+  *out = ok ? (SDL_Color){120,215,130,255} : (SDL_Color){235,125,125,255};
   return true;
 }
 static bool canResetOption(const Opt &option) {
