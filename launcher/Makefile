@@ -127,7 +127,10 @@ all: forwarder-assets $(BUILD)
 forwarder-assets:
 	@$(MAKE) --no-print-directory -C $(TOPDIR)/fwd
 
-$(BUILD): forwarder-assets
+$(TOPDIR)/romfs/forwarder-icon.jpg: $(APP_ICON)
+	@cp "$<" "$@"
+
+$(BUILD): forwarder-assets $(TOPDIR)/romfs/forwarder-icon.jpg
 	@[ -d $@ ] || mkdir -p $@
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 

@@ -1358,7 +1358,10 @@ static bool forwarder_create_common(const std::string &gameKey, const std::strin
         if (err && errSize) snprintf(err, errSize, "Forwarder assets missing.");
         return false;
     }
-    if (!makeNacpIcon(iconImgPath, iconJpeg)) {
+    // The launcher shortcut ships a finished 256x256 JPEG; game covers still need converting.
+    const bool iconReady = launcherOnly ? readFile(iconImgPath, iconJpeg)
+                                        : makeNacpIcon(iconImgPath, iconJpeg);
+    if (!iconReady) {
         if (err && errSize) snprintf(err, errSize, "Failed to convert icon.");
         return false;
     }
@@ -1415,5 +1418,5 @@ bool forwarder_create(const std::string &gameKey, const std::string &name, const
 
 bool forwarder_create_launcher(char *err,std::size_t errSize)
 {
-    return forwarder_create_common("launcher","NetherSX2","","romfs:/logo.png",true,err,errSize);
+    return forwarder_create_common("launcher","NetherSX2","","romfs:/forwarder-icon.jpg",true,err,errSize);
 }
