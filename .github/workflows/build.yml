@@ -197,15 +197,15 @@ jobs:
             echo "Vulkan NVK backend: $VK"
           } > notes.md
           # shellcheck disable=SC2086
-          gh release create "$TAG" --title "$TAG" --notes-file notes.md out/*
+          gh release create "$TAG" --title "$TAG" --notes-file notes.md -R "$GITHUB_REPOSITORY" out/*
           # Prune: keep latest 10 dev-* releases, delete older ones with tags.
           # Manual v* releases are never touched.
-          mapfile -t OLD < <(gh release list --limit 100 \
+          mapfile -t OLD < <(gh release list --limit 100 -R "$GITHUB_REPOSITORY" \
             --json tagName,createdAt \
             --jq 'sort_by(.createdAt) | reverse | .[10:] | .[] | select(.tagName | startswith("dev-")) | .tagName')
           for t in ${OLD[@]+"${OLD[@]}"}; do
             [ -n "$t" ] || continue
             echo "Pruning old release: $t"
-            gh release delete "$t" --yes --cleanup-tag
+            gh release delete "$t" --yes --cleanup-tag -R "$GITHUB_REPOSITORY"
           done
-          gh release list --limit 12
+          gh release list --limit 12 -R "$GITHUB_REPOSITORY"
