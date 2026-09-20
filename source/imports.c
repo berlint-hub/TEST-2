@@ -399,6 +399,7 @@ DynLibFunction dynlib_functions[] = {
   { "mbtowc", (uintptr_t)&mbtowc },
   { "memchr", (uintptr_t)&memchr },
   { "memcmp", (uintptr_t)&memcmp },
+  { "__clear_cache", (uintptr_t)&clear_cache_fake },
   { "memcpy", (uintptr_t)&memcpy },
   { "memmove", (uintptr_t)&memmove },
   { "memset", (uintptr_t)&memset },

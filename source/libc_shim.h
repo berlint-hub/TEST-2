@@ -145,6 +145,8 @@ int munmap_fake(void *addr, size_t length);
 
 void libc_memory_shutdown(void);
 
+void clear_cache_fake(void *beg, void *end);
+
 // pthread extras
 int sem_init_fake(void **s, int pshared, unsigned int value);
 int sem_destroy_fake(void **s);

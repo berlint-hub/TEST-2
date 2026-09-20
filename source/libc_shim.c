@@ -761,14 +761,14 @@ int AndroidBitmap_unlockPixels_fake(void *env, void *bitmap) {
 #define FASTMEM_AREA_SIZE       0x100000000ULL
 #define FASTMEM_PAGE_COUNT      (FASTMEM_AREA_SIZE / MMAP_PAGE)
 #define FASTMEM_BACKING_MIN     0x08000000ULL
-#define FASTMEM_MAPPED_PAGE_LIMIT 16384u
+#define FASTMEM_MAPPED_PAGE_LIMIT 32768u
 #define FASTMEM_ENTRY_EMPTY     UINT32_MAX
 #define FASTMEM_ENTRY_PROTECTED 0x80000000u
 #define FASTMEM_ENTRY_LAZY      0x40000000u
 #define FASTMEM_ENTRY_REMAP     0x20000000u
 #define FASTMEM_ENTRY_PAGE_MASK 0x000fffffu
 #define FASTMEM_ENTRY_FD_SHIFT  20
-#define FASTMEM_FAULT_BATCH_PAGES 16u
+#define FASTMEM_FAULT_BATCH_PAGES 32u
 #define FASTMEM_REVERSE_END     UINT32_MAX
 
 typedef struct {
@@ -1815,9 +1815,11 @@ void *mmap_fake(void *addr, size_t length, int prot, int flags, int fd, off_t of
     free(back);
     return MAP_FAILED;
   }
-  // Writes to the RX view are redirected to the RW alias by the exception handler.
+  // OPTIMIZATION: Return RW view instead of RX view to avoid exception on every JIT store.
+  // Core writes directly to RW (no fault), executes from RW (same physical pages as RX).
+  // I-cache coherence handled by __clear_cache hook.
   MmapRegion region = {
-    .dst = rx,
+    .dst = rw,
     .src = back,
     .size = len,
     .is_code = 1,
@@ -1845,11 +1847,10 @@ void *mmap_fake(void *addr, size_t length, int prot, int flags, int fd, off_t of
   }
   if (mmap_index >= 0 && redirect_index >= 0) {
     g_mmaps[mmap_index] = region;
-    __atomic_store_n(&g_jit_redir[redirect_index].hi, (uintptr_t)rx + len,
+    __atomic_store_n(&g_jit_redir[redirect_index].hi, (uintptr_t)rw + len,
                      __ATOMIC_RELAXED);
-    __atomic_store_n(&g_jit_redir[redirect_index].delta,
-                     (intptr_t)((char *)rw - (char *)rx), __ATOMIC_RELAXED);
-    __atomic_store_n(&g_jit_redir[redirect_index].lo, (uintptr_t)rx, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_jit_redir[redirect_index].delta, 0, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_jit_redir[redirect_index].lo, (uintptr_t)rw, __ATOMIC_RELEASE);
     tracked = 1;
   }
   mutexUnlock(&g_mmap_lock);
@@ -1861,7 +1862,7 @@ void *mmap_fake(void *addr, size_t length, int prot, int flags, int fd, off_t of
     errno = ENOMEM;
     return MAP_FAILED;
   }
-  return rx;
+  return rw;
 }
 
 int mprotect_fake(void *addr, size_t length, int prot) {
@@ -2018,6 +2019,23 @@ int munmap_fake(void *addr, size_t length) {
   free(released_fastmem_pages);
   free(released_fastmem_reverse_next);
   return 0;
+}
+
+// __clear_cache implementation for JIT code cache coherence
+// Called by the core after writing JIT code to RW alias before executing from RX view
+void clear_cache_fake(void *beg, void *end) {
+  uintptr_t b = (uintptr_t)beg;
+  uintptr_t e = (uintptr_t)end;
+  if (b >= e) return;
+  b &= ~0x1Fu;
+  for (uintptr_t p = b; p < e; p += 32) {
+    __asm__ volatile ("dc cvau, %0" : : "r"(p) : "memory");
+  }
+  __asm__ volatile ("dsb ish" ::: "memory");
+  for (uintptr_t p = b; p < e; p += 32) {
+    __asm__ volatile ("ic ivau, %0" : : "r"(p) : "memory");
+  }
+  __asm__ volatile ("isb" ::: "memory");
 }
 
 void libc_memory_shutdown(void) {

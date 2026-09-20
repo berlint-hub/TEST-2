@@ -41,6 +41,37 @@ static const Patch g_patches_4248[] = {
   { 0x4bab84, 0x1e2c1002, 0x1e2a1002, "GS upscale minimum 0.25x" },
 };
 
+// PAC/BTI instruction patterns (NOPs on Cortex-A57, waste ~2500 instruction slots)
+// PACIASP: 0xd50323bf, AUTIASP: 0xd50323ff, BTI J: 0xd503233f
+static const Patch g_patches_pac_bti[] = {
+  { 0, 0xd50323bf, INSN_NOP, "PACIASP" },
+  { 0, 0xd50323ff, INSN_NOP, "AUTIASP" },
+  { 0, 0xd503233f, INSN_NOP, "BTI J" },
+  { 0, 0xd503237f, INSN_NOP, "BTI C" },
+};
+
+static void patch_pac_bti(void) {
+  const uint8_t *code = (const uint8_t *)emu_mod.load_base;
+  const size_t code_size = emu_mod.load_size;
+  int patched = 0;
+  for (size_t i = 0; i + 4 <= code_size; i += 4) {
+    uint32_t insn = *(const uint32_t *)(code + i);
+    for (size_t p = 0; p < sizeof(g_patches_pac_bti) / sizeof(g_patches_pac_bti[0]); p++) {
+      if (insn == g_patches_pac_bti[p].expect) {
+        volatile uint32_t *p_loc = (volatile uint32_t *)(code + i);
+        *p_loc = INSN_NOP;
+        patched++;
+        break;
+      }
+    }
+  }
+  if (patched) {
+    // Flush I-cache after patching
+    armDCacheFlush((void *)code, code_size);
+    armICacheInvalidate((void *)code, code_size);
+  }
+}
+
 static const Patch g_patches_3668[] = {
   { 0x82d0c0, 0x5400c3eb, INSN_NOP,        "s1 b.lt(len)" },
   { 0x82d0d8, 0x940c68aa, INSN_NOP,        "s1 bl memchr" },
@@ -260,6 +291,8 @@ void patch_game(void) {
   }
 
   patch_quick_menu_center();
+
+  patch_pac_bti();
 
   if (!in_range((uint32_t)g_reqstop_slot, 8))
     return;
