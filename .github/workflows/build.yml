@@ -43,6 +43,9 @@ jobs:
     container:
       image: devkitpro/devkita64:20260219
     timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
     env:
       DEVKITPRO: /opt/devkitpro
       JOBS: "4"
