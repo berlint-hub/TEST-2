@@ -69,7 +69,13 @@ jobs:
       - name: Install Switch portlibs
         run: |
           set -euo pipefail
-          dkp-pacman -Syu --noconfirm
+          # pkg.devkitpro.org sporadically 403s GitHub-runner IPs: retry sync.
+          for i in 1 2 3 4 5; do
+            dkp-pacman -Syu --noconfirm && break
+            echo "dkp sync attempt $i failed, retrying in 30s..."
+            sleep 30
+            [ "$i" -lt 5 ] || exit 1
+          done
           dkp-pacman -S --noconfirm --needed \
             devkitA64 switch-tools libnx \
             switch-sdl2 switch-sdl2_ttf switch-sdl2_image \
