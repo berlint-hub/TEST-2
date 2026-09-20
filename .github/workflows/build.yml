@@ -138,7 +138,27 @@ jobs:
           export DEVKITPRO=/opt/devkitpro
           export PATH="$DEVKITPRO/tools/bin:$PATH"
           if [ -n "${CORES_DIR:-}" ]; then
-            ./build_all.sh
+            if [ -f vulkan/include/vulkan/vulkan_core.h ] || [ -n "${MESA_SDK_ROOT:-}" ]; then
+              ./build_all.sh
+            else
+              # TEMPORARY (no Vulkan SDK, single 3668 core for both slots):
+              # GL-only full bundle without build_all.sh (which mandates VK).
+              # Remove once the single-core launcher lands.
+              echo "No Vulkan SDK - GL-only full bundle (3668 core in both slots)."
+              mkdir -p launcher/romfs/cores launcher/romfs/emu
+              cp -f "$CORES_DIR/NetherSX2-v2.2n-4248/lib/arm64-v8a/libemucore.so" launcher/romfs/cores/emucore_4248.so
+              cp -f "$CORES_DIR/NetherSX2-v2.2n-3668/lib/arm64-v8a/libemucore.so" launcher/romfs/cores/emucore_3668.so
+              cp -f NetherSX2_nx_gl.nro launcher/romfs/emu/NetherSX2_nx_gl.nro
+              for b in 4248 3668; do
+                rd="launcher/romfs/res/$b"
+                rm -rf "$rd"; mkdir -p "$rd"
+                cp -rf "$CORES_DIR/NetherSX2-v2.2n-$b/assets/." "$rd/"
+                rm -rf "$rd/dexopt"
+              done
+              make -C launcher/fwd -j"$JOBS"
+              (cd launcher && make -j"$JOBS")
+              mv -f launcher/NetherSX2.nro NetherSX2.nro
+            fi
             echo "full=true" >> "$GITHUB_OUTPUT"
           else
             echo "No cores supplied - launcher built WITHOUT emulator cores (dev artifact only)."
