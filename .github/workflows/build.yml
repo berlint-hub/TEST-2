@@ -122,6 +122,10 @@ jobs:
       - name: Build + stage Vulkan package
         run: |
           set -euo pipefail
+          # nxvk scripts hardcode the repo at /work (their docker bind-mount).
+          # Recreate that layout with a symlink so RUST_TARGET_PATH resolves.
+          ln -sfn "$GITHUB_WORKSPACE/nxvk" /work
+          test -d /work/switch/rust
           cd nxvk
           make CONTAINER=
           test -f switch/build/pkg/lib/libnvk.a
