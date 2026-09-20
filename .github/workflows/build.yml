@@ -43,7 +43,7 @@ jobs:
       JOBS: "4"
     outputs:
       full: ${{ steps.bundle.outputs.full }}
-      vk: ${{ steps VK.outputs.built }}
+      vk: ${{ steps.VK.outputs.built }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
