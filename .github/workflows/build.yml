@@ -54,8 +54,9 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y xz-utils
           # apt.devkitpro.org sits behind Cloudflare bot protection: default
-          # curl/wget user-agents get HTTP 403, a browser UA returns 200.
-          curl -fsSL -A "Mozilla/5.0" -o install-devkitpro-pacman \
+          # curl/wget user-agents get HTTP 403. The official installer itself
+          # uses UA "dkp apt" (allowlisted), so we do the same.
+          curl -fsSL -A "dkp apt" -o install-devkitpro-pacman \
             https://apt.devkitpro.org/install-devkitpro-pacman
           chmod +x install-devkitpro-pacman
           sudo ./install-devkitpro-pacman
