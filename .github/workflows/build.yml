@@ -56,6 +56,7 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
       RUSTUP_HOME: /opt/rust/rustup
       CARGO_HOME: /opt/rust/cargo
+      RUST_NIGHTLY: nightly-2026-07-02
     steps:
       - name: Free disk space (Mesa build is big)
         run: |
