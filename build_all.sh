@@ -9,6 +9,9 @@ JOBS=${JOBS:-18}
 APP="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$APP")"
 CORES_DIR="${CORES_DIR:-$ROOT}"
+# Emulator Makefile names its output after the checkout dir
+# (NetherSX2_nx.nro upstream, TEST-2.nro in this fork).
+EMU_NRO="$(basename "$APP").nro"
 
 required=(
   "$CORES_DIR/NetherSX2-v2.2n-4248/lib/arm64-v8a/libemucore.so"
@@ -62,12 +65,12 @@ echo "==== emulator: Vulkan (NVK) ===="
 cd "$APP"
 make clean >/dev/null 2>&1
 make -j"$JOBS" RENDERER=VK
-cp -f NetherSX2_nx.nro NetherSX2_nx_vk.nro
+cp -f "$EMU_NRO" NetherSX2_nx_vk.nro
 
 echo "==== emulator: OpenGL ===="
 make clean >/dev/null 2>&1
 make -j"$JOBS"
-cp -f NetherSX2_nx.nro NetherSX2_nx_gl.nro
+cp -f "$EMU_NRO" NetherSX2_nx_gl.nro
 
 echo "==== bundle cores + emulator binaries into the launcher romfs ===="
 mkdir -p "$APP/launcher/romfs/cores" "$APP/launcher/romfs/emu"
@@ -94,7 +97,7 @@ make clean >/dev/null 2>&1
 make -j"$JOBS"
 
 mv -f "$APP/launcher/NetherSX2.nro" "$APP/NetherSX2.nro"
-rm -f "$APP/NetherSX2_nx.nro" "$APP/NetherSX2_nx_vk.nro" "$APP/NetherSX2_nx_gl.nro"
+rm -f "$APP/$EMU_NRO" "$APP/NetherSX2_nx_vk.nro" "$APP/NetherSX2_nx_gl.nro"
 
 echo
 echo "Done. The only file to copy:"

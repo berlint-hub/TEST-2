@@ -109,7 +109,10 @@ jobs:
           export PATH="$DEVKITPRO/tools/bin:$PATH"
           make clean >/dev/null 2>&1 || true
           make -j"$JOBS"
-          cp -f NetherSX2_nx.nro NetherSX2_nx_gl.nro
+          # Makefile TARGET is the checkout dir name (TEST-2.nro here,
+          # NetherSX2_nx.nro upstream) - normalize to canonical artifact name.
+          EMU_NRO=$(ls -t ./*.nro | head -n 1)
+          cp -f "$EMU_NRO" NetherSX2_nx_gl.nro
 
       - name: Build emulator (Vulkan NVK, if SDK present)
         id: VK
@@ -120,7 +123,8 @@ jobs:
           if [ -f vulkan/include/vulkan/vulkan_core.h ] || [ -n "${MESA_SDK_ROOT:-}" ]; then
             make clean >/dev/null 2>&1 || true
             make -j"$JOBS" RENDERER=VK
-            cp -f NetherSX2_nx.nro NetherSX2_nx_vk.nro
+            EMU_NRO=$(ls -t ./*.nro | head -n 1)
+            cp -f "$EMU_NRO" NetherSX2_nx_vk.nro
             echo "built=true" >> "$GITHUB_OUTPUT"
           else
             echo "No vulkan/ SDK and no MESA_SDK_ROOT - skipping VK build."
