@@ -41,15 +41,27 @@ env:
 
 jobs:
   nxvk-sdk:
-    runs-on: ubuntu-latest
+    # Build nxvk directly in the devkitPro container (CONTAINER= disables
+    # their docker/podman wrapper). Same user everywhere -> no bind-mount
+    # ownership issues, and devkitA64 `ar` is present for the packaging step.
+    runs-on: ubuntu-22.04
+    container:
+      image: devkitpro/devkita64:20260219
     timeout-minutes: 300
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEVKITPRO: /opt/devkitpro
+      DEBIAN_FRONTEND: noninteractive
+      RUSTUP_HOME: /opt/rust/rustup
+      CARGO_HOME: /opt/rust/cargo
     steps:
       - name: Free disk space (Mesa build is big)
         run: |
           df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+          rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
             /usr/local/share/boost /opt/hostedtoolcache/CodeQL 2>/dev/null || true
-          sudo docker image prune -af 2>/dev/null || true
           df -h /
 
       - name: Checkout nxvk (pinned)
@@ -59,26 +71,61 @@ jobs:
           ref: ${{ env.NXVK_REV }}
           path: nxvk
 
-      - name: Build toolchain image (retry, dkp flake)
+      - name: Install nxvk build deps (mirrors switch/docker/Dockerfile)
         run: |
           set -euo pipefail
-          cd nxvk
-          for i in 1 2 3; do
-            make image CONTAINER=docker && break
-            echo "image build attempt $i failed, retrying..."
-            sleep 30
-            [ "$i" -lt 3 ] || exit 1
+          apt-get update -y
+          apt-get install -y --no-install-recommends \
+            python3-pip bison flex curl ca-certificates pkg-config git \
+            build-essential cmake ninja-build \
+            llvm-15-dev clang-15 libclang-15-dev \
+            libclc-15-dev libclc-15 llvm-spirv-15 libllvmspirvlib-15-dev \
+            libdrm-dev glslang-tools
+          python3 -m pip install --break-system-packages --no-cache-dir \
+            'meson>=1.4' mako pyyaml
+          echo "deb http://deb.debian.org/debian trixie main" > /etc/apt/sources.list.d/trixie.list
+          printf 'Package: *\nPin: release n=trixie\nPin-Priority: 100\n' > /etc/apt/preferences.d/trixie-pin
+          apt-get update -y
+          apt-get install -y --no-install-recommends -t trixie spirv-tools
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Install Rust toolchain (mirrors Dockerfile)
+        run: |
+          set -euo pipefail
+          export PATH="/opt/rust/cargo/bin:$PATH"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+            sh -s -- -y --default-toolchain nightly-2026-07-02 \
+              --profile minimal --component rust-src
+          cargo install --locked bindgen-cli cbindgen
+          rustup component add rustfmt
+          rustc --version; cargo --version
+
+      - name: Dockerfile-equivalent host setup
+        run: |
+          set -euo pipefail
+          export PATH="/opt/rust/cargo/bin:$PATH"
+          mkdir -p /opt/switch-cross-include/libdrm
+          cp /usr/include/xf86drm.h /usr/include/xf86drmMode.h /opt/switch-cross-include/ 2>/dev/null || true
+          cp -r /usr/include/libdrm/* /opt/switch-cross-include/ 2>/dev/null || true
+          cp -r /usr/include/libdrm/* /opt/switch-cross-include/libdrm/ 2>/dev/null || true
+          cp -r nxvk/switch/docker/cross-include/. /opt/switch-cross-include/
+          XDIR=/opt/devkitpro/portlibs/switch/lib/pkgconfig; mkdir -p "$XDIR"
+          for name in libclc LLVMSPIRVLib SPIRV-Tools SPIRV-Tools-shared SPIRV-Headers; do
+            f=$(find /usr -name "$name.pc" 2>/dev/null | head -1)
+            if [ -n "$f" ]; then cp "$f" "$XDIR/"; echo "baked $f"; fi
           done
-          docker images | grep -i nxvk || true
+          /opt/devkitpro/devkitA64/bin/aarch64-none-elf-ar rcs \
+            /opt/devkitpro/portlibs/switch/lib/libdl.a
+          echo "/opt/rust/cargo/bin" >> "$GITHUB_PATH"
 
       - name: Build + stage Vulkan package
         run: |
           set -euo pipefail
           cd nxvk
-          make CONTAINER=docker
+          make CONTAINER=
           test -f switch/build/pkg/lib/libnvk.a
           test -f switch/build/pkg/lib/libnvk_support.a
-          du -sh switch/build/pkg switch/build/cross
+          du -sh switch/build/pkg
 
       - name: Pack SDK artifact
         run: |
