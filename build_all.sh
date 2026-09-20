@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# VK-only bundle (nxvk). The switch-mesa OpenGL path was removed: the bundle
+# ships a single emulator binary (NetherSX2_nx_vk.nro).
 set -euo pipefail
 export DEVKITPRO=${DEVKITPRO:-/opt/devkitpro}
 export DEVKITARM=$DEVKITPRO/devkitARM
@@ -9,6 +11,10 @@ JOBS=${JOBS:-18}
 APP="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$APP")"
 CORES_DIR="${CORES_DIR:-$ROOT}"
+# nxvk SDK: staged `switch/build/pkg` from PalindromicBreadLoaf/nxvk
+# (include/vulkan/ + lib/libnvk.a + lib/libnvk_support.a). Empty =
+# nxvk installed as a devkitPro portlib.
+NXVK_SDK_ROOT="${NXVK_SDK_ROOT:-$APP/nxvk-sdk}"
 
 required=(
   "$CORES_DIR/NetherSX2-v2.2n-4248/lib/arm64-v8a/libemucore.so"
@@ -16,17 +22,11 @@ required=(
   "$CORES_DIR/NetherSX2-v2.2n-3668/lib/arm64-v8a/libemucore.so"
   "$CORES_DIR/NetherSX2-v2.2n-3668/assets/GameIndex.yaml"
 )
-if [[ -n "${MESA_SDK_ROOT:-}" ]]; then
+if [[ -n "$NXVK_SDK_ROOT" ]]; then
   required+=(
-    "$MESA_SDK_ROOT/include/vulkan/vulkan_core.h"
-    "$MESA_SDK_ROOT/include/EGL/egl.h"
-    "$MESA_SDK_ROOT/lib/libvulkan.a"
-    "$MESA_SDK_ROOT/lib/libEGL.a"
-  )
-else
-  required+=(
-    "$APP/vulkan/include/vulkan/vulkan_core.h"
-    "$APP/vulkan/lib/libnvk.a"
+    "$NXVK_SDK_ROOT/include/vulkan/vulkan_core.h"
+    "$NXVK_SDK_ROOT/lib/libnvk.a"
+    "$NXVK_SDK_ROOT/lib/libnvk_support.a"
   )
 fi
 for file in "${required[@]}"; do
@@ -58,23 +58,19 @@ fi
 cmake "${deps_args[@]}"
 cmake --build "$DEPS_BUILD" --parallel "$JOBS"
 
-echo "==== emulator: Vulkan (NVK) ===="
+echo "==== emulator: Vulkan (nxvk) ===="
 cd "$APP"
-make clean >/dev/null 2>&1
-make -j"$JOBS" RENDERER=VK
-cp -f NetherSX2_nx.nro NetherSX2_nx_vk.nro
-
-echo "==== emulator: OpenGL ===="
+export NXVK_SDK_ROOT
 make clean >/dev/null 2>&1
 make -j"$JOBS"
-cp -f NetherSX2_nx.nro NetherSX2_nx_gl.nro
+EMU_NRO="$(ls -t ./*.nro | head -n 1)"
+cp -f "$EMU_NRO" NetherSX2_nx_vk.nro
 
-echo "==== bundle cores + emulator binaries into the launcher romfs ===="
+echo "==== bundle cores + emulator binary into the launcher romfs ===="
 mkdir -p "$APP/launcher/romfs/cores" "$APP/launcher/romfs/emu"
 cp -f "$CORES_DIR/NetherSX2-v2.2n-4248/lib/arm64-v8a/libemucore.so" "$APP/launcher/romfs/cores/emucore_4248.so"
 cp -f "$CORES_DIR/NetherSX2-v2.2n-3668/lib/arm64-v8a/libemucore.so" "$APP/launcher/romfs/cores/emucore_3668.so"
 cp -f "$APP/NetherSX2_nx_vk.nro" "$APP/launcher/romfs/emu/NetherSX2_nx_vk.nro"
-cp -f "$APP/NetherSX2_nx_gl.nro" "$APP/launcher/romfs/emu/NetherSX2_nx_gl.nro"
 
 echo "==== bundle per-build resources into the launcher romfs ===="
 for b in 4248 3668; do
@@ -94,7 +90,7 @@ make clean >/dev/null 2>&1
 make -j"$JOBS"
 
 mv -f "$APP/launcher/NetherSX2.nro" "$APP/NetherSX2.nro"
-rm -f "$APP/NetherSX2_nx.nro" "$APP/NetherSX2_nx_vk.nro" "$APP/NetherSX2_nx_gl.nro"
+rm -f "$APP/NetherSX2_nx.nro" "$APP/NetherSX2_nx_vk.nro"
 
 echo
 echo "Done. The only file to copy:"

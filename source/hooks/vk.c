@@ -1016,6 +1016,9 @@ vkEnumerateInstanceExtensionProperties_hook(const char *layer, uint32_t *pCount,
 VkResult VKAPI_CALL
 vkCreateInstance_hook(const VkInstanceCreateInfo *ci,
                       const VkAllocationCallbacks *alloc, VkInstance *out) {
+  // nxvk refuses device creation unless this is set; the hook runs before
+  // anything touches the driver, so this is the earliest safe spot.
+  setenv("NVK_I_WANT_A_BROKEN_VULKAN_DRIVER", "1", 1);
 #ifdef NETHERSX2_VK_DIAGNOSTIC
   vk_diag_note("vkCreateInstance begin api=%u app=%s engine=%s extensions=%u",
                ci->pApplicationInfo ? ci->pApplicationInfo->apiVersion : 0,

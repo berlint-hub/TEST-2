@@ -11,4 +11,5 @@
 *.map
 /out/
 /vulkan/
+/nxvk-sdk/
 Lossless.dll

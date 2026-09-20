@@ -35,17 +35,17 @@ ifneq ($(strip $(NETHERSX2_VK_DIAGNOSTIC)),)
 DEFINES += -DNETHERSX2_VK_DIAGNOSTIC
 endif
 
-# --- renderer select: GL (default) or VK (Mesa NVK) ------------------------
-# GL and Vulkan are mutually exclusive (switch-mesa's libEGL/GLES and the NVK
-# archives both bundle mesa util/nir/compiler object code -> can't co-link).
-#   make             -> OpenGL (switch-mesa GLES, unchanged)
-#   make RENDERER=VK -> Vulkan (Mesa NVK, vendored flat under vulkan/)
-RENDERER ?= GL
-MESA_SDK_ROOT ?=
-ifneq ($(strip $(MESA_SDK_ROOT)),)
-DEFINES += -DUSE_UNIFIED_MESA
-endif
-ifeq ($(RENDERER),VK)
+# --- renderer: Vulkan via nxvk ONLY ---------------------------------------
+# The switch-mesa OpenGL (NVC0 nouveau) path was removed: on Tegra X1 the
+# native API is Vulkan (NVK). RENDERER is accepted as a no-op so old
+# invocations keep working.
+RENDERER ?= VK
+# nxvk SDK (PalindromicBreadLoaf/nxvk): `make` stages switch/build/pkg with
+# include/vulkan/ + lib/libnvk.a + lib/libnvk_support.a. Point NXVK_SDK_ROOT
+# at that staged dir (CI downloads it as an artifact). Empty = nxvk
+# installed as a devkitPro portlib (headers/libs come from PORTLIBS).
+NXVK_SDK_ROOT ?=
+NXVK_ROOT := $(if $(strip $(NXVK_SDK_ROOT)),$(NXVK_SDK_ROOT),$(PORTLIBS))
 DEFINES	+=	-DUSE_VULKAN -DGS_RENDERER=14 -DVK_USE_PLATFORM_VI_NN
 SOURCES	+=	source/lsfg \
 			third_party/lsfg-vk/lsfg-vk-common/src/helpers \
@@ -58,66 +58,27 @@ INCLUDES	+=	source/lsfg \
 			third_party/lsfg-vk/lsfg-vk-common/include \
 			third_party/lsfg-vk/lsfg-vk-backend/include \
 			third_party/lsfg-vk/lsfg-vk-backend/src
-else
-DEFINES	+=	-DGS_RENDERER=12
-endif
 
-CFLAGS	:=	-g -Wall -O3 -ffunction-sections -fno-omit-frame-pointer $(LTOFLAGS) \
+CFLAGS	:=	-g -Wall -O3 -ffunction-sections -fdata-sections -fno-omit-frame-pointer $(LTOFLAGS) \
 			$(ARCH) $(DEFINES)
 CFLAGS	+=	$(INCLUDE)
 CXXFLAGS	:= $(CFLAGS) -std=gnu++20
 
 ASFLAGS	:=	-g $(ARCH)
-LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) $(LTOFLAGS) -Wl,-Map,$(notdir $*.map)
+LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) $(LTOFLAGS) -Wl,--gc-sections -Wl,-Map,$(notdir $*.map)
 
 STORAGE_LIBS := $(TOPDIR)/launcher/dependencies/build/_deps/libsmb2-build/lib/libsmb2.a \
 				$(TOPDIR)/launcher/dependencies/build/_deps/libusbhsfs-build/liblibusbhsfs.a \
 				$(PORTLIBS)/lib/libntfs-3g.a
 
-# nx: libnx (audren for the AAudio shim, HID, applet, fs). m: libm. No SDL2/
-# OpenSL ES -- audio is the in-tree AAudio->audren shim (source/aaudio.c).
-ifeq ($(RENDERER),VK)
-ifneq ($(strip $(MESA_SDK_ROOT)),)
-# Unified Mesa SDK: the Vulkan driver and all private Mesa dependencies are
-# packaged in one archive. External dependencies stay in devkitPro portlibs.
-LIBDIRS	:= $(MESA_SDK_ROOT) $(PORTLIBS) $(LIBNX)
-LIBS	:= -Wl,--start-group -lvulkan -lEGL -lGLESv2 -lglapi \
-		-lmesa_util_c11 -lblake3 -lmesa_util -lmesa_util_simd -lxmlconfig \
-		-Wl,--end-group $(STORAGE_LIBS) -lcurl -lelf -lexpat -lz -lzstd \
-		-lnx -lstdc++ -lm
-else
-# Mesa NVK: 23 vendored static archives (vulkan/lib) linked in one --start-group
-# (circular NVK<->runtime<->nir<->compiler deps). -l:libX.a links by exact file
-# name (avoids the -lvulkan GROUP-script + the double-prefixed liblibnil...a).
-# -lz/-lzstd resolve crc32/ZSTD_*; the DRM/nouveau_ws path is dead-stripped so no
-# -ldrm_nouveau. -lstdc++/libgcc unwinder are needed by NAK's bundled Rust.
-LIBDIRS	:= $(TOPDIR)/vulkan $(PORTLIBS) $(LIBNX)
-LIBS	:= -Wl,--start-group \
-		-l:libnvk.a -l:libvulkan_lite_runtime.a -l:libvulkan_runtime.a \
-		-l:libvulkan_lite_instance.a -l:libvulkan_instance.a \
-		-l:libvulkan_util.a -l:libvulkan_wsi.a \
-		-l:libnak.a -l:libnak_rs.a -l:libvtn.a -l:libxmlconfig.a \
-		-l:libnil.a -l:liblibnil_format_table.a -l:libnouveau_mme.a \
-		-l:libnouveau_ws.a -l:libnvidia_headers_c.a \
-		-l:libnir.a -l:libcompiler.a -l:libcompiler_c_helpers.a \
-		-l:libmesa_util.a -l:libmesa_util_simd.a -l:libblake3.a -l:libmesa_util_c11.a \
-		-Wl,--end-group $(STORAGE_LIBS) -lcurl -lz -lzstd -lnx -lstdc++ -lm
-endif
-else
-ifneq ($(strip $(MESA_SDK_ROOT)),)
-# The unified EGL archive contains both native NVC0 and Zink. Keep Vulkan in
-# the same rescan group so the GL host can select either driver at runtime.
-LIBDIRS	:= $(MESA_SDK_ROOT) $(PORTLIBS) $(LIBNX)
-LIBS	:= -Wl,--start-group -lvulkan -lEGL -lGLESv2 -lglapi \
-		-lmesa_util_c11 -lblake3 -lmesa_util -lmesa_util_simd -lxmlconfig \
-		-Wl,--end-group $(STORAGE_LIBS) -lcurl -lelf -lexpat -lz -lzstd \
-		-lnx -lstdc++ -lm
-else
-# EGL/GLESv2/glapi/drm_nouveau: switch-mesa/nouveau GL.
-LIBDIRS	:= $(PORTLIBS) $(LIBNX)
-LIBS	:= $(STORAGE_LIBS) -lcurl -lz -lEGL -lGLESv2 -lglapi -ldrm_nouveau -lnx -lm
-endif
-endif
+# nxvk link (see nxvk switch/README.md "Linking against the installed portlib"):
+# whole-archive libnvk, support group (zlib+expat), ICD entrypoint pin.
+# -lnx/-lstdc++/-lm stay after the driver (NAK's bundled Rust needs libgcc).
+LIBDIRS	:= $(NXVK_ROOT) $(PORTLIBS) $(LIBNX)
+LIBS	:= -Wl,--whole-archive -lnvk -Wl,--no-whole-archive \
+		-Wl,--start-group -lnvk_support -lz -lexpat -Wl,--end-group \
+		-Wl,-u,vk_icdGetInstanceProcAddr \
+		$(STORAGE_LIBS) -lcurl -lnx -lstdc++ -lm
 
 #---------------------------------------------------------------------------------
 ifneq ($(BUILD),$(notdir $(CURDIR)))

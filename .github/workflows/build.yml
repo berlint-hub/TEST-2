@@ -1,12 +1,14 @@
 name: Switch build
 
-# Builds NetherSX2.nro with devkitA64.
-# Full bundle (cores + Vulkan + final NRO) needs proprietary inputs that are
-# NOT in git (see .gitignore: /vulkan/, APK trees with libemucore.so).
-# Without them CI builds: storage deps + emulator GL NRO + forwarder + launcher
-# (renamed to NetherSX2-nocores.nro so nobody mistakes it for a working build).
-# Supply cores via workflow_dispatch input `cores_tarball_url` (pre-signed URL
-# to a .tar.gz containing NetherSX2-v2.2n-4248/ and NetherSX2-v2.2n-3668/).
+# VK-only (nxvk) full bundle.
+# insumos:
+#   - nxvk SDK: built from source (PalindromicBreadLoaf/nxvk, pinned below)
+#     in the nxvk-sdk job, passed as an artifact. No prebuilt binaries in git.
+#   - proprietary cores + assets: NOT in git. Supply via workflow_dispatch
+#     input `cores_tarball_url` (pre-signed URL to a .tar.gz with
+#     NetherSX2-v2.2n-4248/ and NetherSX2-v2.2n-3668/).
+#     TEMP test hook: on push to main, falls back to the Catbox tarball so a
+#     plain push builds FULL. Remove once dispatch-only flow is confirmed.
 
 on:
   push:
@@ -34,12 +36,67 @@ concurrency:
   group: switch-build-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NXVK_REV: e028d428c3b1f2dabadd81645c53cddfc8d7ab51
+
 jobs:
+  nxvk-sdk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Free disk space (Mesa build is big)
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /opt/hostedtoolcache/CodeQL 2>/dev/null || true
+          sudo docker image prune -af 2>/dev/null || true
+          df -h /
+
+      - name: Checkout nxvk (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: PalindromicBreadLoaf/nxvk
+          ref: ${{ env.NXVK_REV }}
+          path: nxvk
+
+      - name: Build toolchain image (retry, dkp flake)
+        run: |
+          set -euo pipefail
+          cd nxvk
+          for i in 1 2 3; do
+            make image CONTAINER=docker && break
+            echo "image build attempt $i failed, retrying..."
+            sleep 30
+            [ "$i" -lt 3 ] || exit 1
+          done
+          docker images | grep -i nxvk || true
+
+      - name: Build + stage Vulkan package
+        run: |
+          set -euo pipefail
+          cd nxvk
+          make CONTAINER=docker
+          test -f switch/build/pkg/lib/libnvk.a
+          test -f switch/build/pkg/lib/libnvk_support.a
+          du -sh switch/build/pkg switch/build/cross
+
+      - name: Pack SDK artifact
+        run: |
+          set -euo pipefail
+          tar -czf nxvk-sdk.tgz -C nxvk/switch/build/pkg .
+          ls -la nxvk-sdk.tgz
+
+      - name: Upload nxvk SDK
+        uses: actions/upload-artifact@v4
+        with:
+          name: nxvk-sdk-${{ env.NXVK_REV }}
+          path: nxvk-sdk.tgz
+          retention-days: 7
+
   build:
+    needs: nxvk-sdk
     runs-on: ubuntu-22.04
-    # Official devkitPro image (Docker Hub, no Cloudflare block unlike
-    # apt.devkitpro.org which 403s GitHub-runner IPs). Already contains
-    # DEVKITPRO=/opt/devkitpro, dkp-pacman and the A64 toolchain base.
+    # Official devkitPro image: DEVKITPRO=/opt/devkitpro, dkp-pacman, A64 base.
     container:
       image: devkitpro/devkita64:20260219
     timeout-minutes: 180
@@ -51,7 +108,6 @@ jobs:
       JOBS: "4"
     outputs:
       full: ${{ steps.bundle.outputs.full }}
-      vk: ${{ steps.VK.outputs.built }}
     steps:
       - name: Ensure node/git/cmake for actions
         run: |
@@ -65,6 +121,22 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Download nxvk SDK
+        uses: actions/download-artifact@v4
+        with:
+          name: nxvk-sdk-${{ env.NXVK_REV }}
+          path: sdk-tmp/
+
+      - name: Unpack nxvk SDK
+        run: |
+          set -euo pipefail
+          mkdir -p nxvk-sdk
+          tar -xzf sdk-tmp/nxvk-sdk.tgz -C nxvk-sdk
+          test -f nxvk-sdk/include/vulkan/vulkan_core.h
+          test -f nxvk-sdk/lib/libnvk.a
+          test -f nxvk-sdk/lib/libnvk_support.a
+          echo "NXVK_SDK_ROOT=$GITHUB_WORKSPACE/nxvk-sdk" >> "$GITHUB_ENV"
 
       - name: Install Switch portlibs
         run: |
@@ -80,14 +152,6 @@ jobs:
             devkitA64 switch-tools libnx \
             switch-sdl2 switch-sdl2_ttf switch-sdl2_image \
             switch-curl switch-mesa switch-libdrm_nouveau switch-ntfs-3g
-
-      - name: Build storage dependencies (libsmb2, libusbhsfs)
-        run: |
-          set -euo pipefail
-          cmake -S launcher/dependencies -B launcher/dependencies/build -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$DEVKITPRO/cmake/Switch.cmake" \
-            -DCMAKE_BUILD_TYPE=Release
-          cmake --build launcher/dependencies/build --parallel "$JOBS"
 
       - name: Fetch proprietary cores (optional)
         id: cores
@@ -113,69 +177,25 @@ jobs:
             test -f "$GITHUB_WORKSPACE/cores-in/$f" || { echo "Missing: $f" >&2; exit 1; }
           done
 
-      - name: Build emulator (OpenGL)
-        run: |
-          set -euo pipefail
-          export DEVKITPRO=/opt/devkitpro
-          export PATH="$DEVKITPRO/tools/bin:$PATH"
-          make clean >/dev/null 2>&1 || true
-          make -j"$JOBS"
-          # Makefile TARGET is the checkout dir name (TEST-2.nro here,
-          # NetherSX2_nx.nro upstream) - normalize to canonical artifact name.
-          EMU_NRO=$(ls -t ./*.nro | head -n 1)
-          cp -f "$EMU_NRO" NetherSX2_nx_gl.nro
-
-      - name: Build emulator (Vulkan NVK, if SDK present)
-        id: VK
-        run: |
-          set -euo pipefail
-          export DEVKITPRO=/opt/devkitpro
-          export PATH="$DEVKITPRO/tools/bin:$PATH"
-          if [ -f vulkan/include/vulkan/vulkan_core.h ] || [ -n "${MESA_SDK_ROOT:-}" ]; then
-            make clean >/dev/null 2>&1 || true
-            make -j"$JOBS" RENDERER=VK
-            EMU_NRO=$(ls -t ./*.nro | head -n 1)
-            cp -f "$EMU_NRO" NetherSX2_nx_vk.nro
-            echo "built=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No vulkan/ SDK and no MESA_SDK_ROOT - skipping VK build."
-            echo "built=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Bundle cores and build launcher
+      - name: Full bundle (VK-only)
         id: bundle
         run: |
           set -euo pipefail
           export DEVKITPRO=/opt/devkitpro
           export PATH="$DEVKITPRO/tools/bin:$PATH"
           if [ -n "${CORES_DIR:-}" ]; then
-            if [ -f vulkan/include/vulkan/vulkan_core.h ] || [ -n "${MESA_SDK_ROOT:-}" ]; then
-              ./build_all.sh
-            else
-              # TEMPORARY (no Vulkan SDK, single 3668 core for both slots):
-              # GL-only full bundle without build_all.sh (which mandates VK).
-              # Remove once the single-core launcher lands.
-              echo "No Vulkan SDK - GL-only full bundle (3668 core in both slots)."
-              mkdir -p launcher/romfs/cores launcher/romfs/emu
-              cp -f "$CORES_DIR/NetherSX2-v2.2n-4248/lib/arm64-v8a/libemucore.so" launcher/romfs/cores/emucore_4248.so
-              cp -f "$CORES_DIR/NetherSX2-v2.2n-3668/lib/arm64-v8a/libemucore.so" launcher/romfs/cores/emucore_3668.so
-              cp -f NetherSX2_nx_gl.nro launcher/romfs/emu/NetherSX2_nx_gl.nro
-              for b in 4248 3668; do
-                rd="launcher/romfs/res/$b"
-                rm -rf "$rd"; mkdir -p "$rd"
-                cp -rf "$CORES_DIR/NetherSX2-v2.2n-$b/assets/." "$rd/"
-                rm -rf "$rd/dexopt"
-              done
-              make -C launcher/fwd -j"$JOBS"
-              (cd launcher && make -j"$JOBS")
-              mv -f launcher/NetherSX2.nro NetherSX2.nro
-            fi
+            ./build_all.sh
             echo "full=true" >> "$GITHUB_OUTPUT"
           else
-            echo "No cores supplied - launcher built WITHOUT emulator cores (dev artifact only)."
-            make -C launcher/fwd -j"$JOBS"
-            (cd launcher && make -j"$JOBS")
-            mv -f launcher/NetherSX2.nro NetherSX2-nocores.nro
+            echo "No cores supplied - toolchain compile check only (dev artifact)."
+            cmake -S launcher/dependencies -B launcher/dependencies/build -G Ninja \
+              -DCMAKE_TOOLCHAIN_FILE="$DEVKITPRO/cmake/Switch.cmake" \
+              -DCMAKE_BUILD_TYPE=Release
+            cmake --build launcher/dependencies/build --parallel "$JOBS"
+            make clean >/dev/null 2>&1 || true
+            make -j"$JOBS"
+            EMU_NRO=$(ls -t ./*.nro | head -n 1)
+            cp -f "$EMU_NRO" NetherSX2_nx_vk_check.nro
             echo "full=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -183,10 +203,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
-          cp -f NetherSX2_nx_gl.nro out/ 2>/dev/null || true
-          cp -f NetherSX2_nx_vk.nro out/ 2>/dev/null || true
           cp -f NetherSX2.nro out/ 2>/dev/null || true
-          cp -f NetherSX2-nocores.nro out/ 2>/dev/null || true
+          cp -f NetherSX2_nx_vk_check.nro out/ 2>/dev/null || true
           ls -la out/
 
       - name: Upload artifacts
@@ -212,20 +230,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           FULL: ${{ needs.build.outputs.full }}
-          VK: ${{ needs.build.outputs.vk }}
         run: |
           set -euo pipefail
           TAG="dev-$(date -u +%Y%m%d-%H%M)-${GITHUB_SHA:0:7}"
           {
             echo "Automated Switch dev build from ${GITHUB_SHA}."
             echo ""
+            echo "Renderer: Vulkan (nxvk) only; nxvk rev ${NXVK_REV:0:12}."
             if [ "$FULL" = "true" ]; then
               echo "Contents: FULL bundle (cores + launcher NetherSX2.nro)."
             else
               echo "Contents: PARTIAL dev artifacts only (NO emulator cores)."
-              echo "NetherSX2-nocores.nro is NOT a working build - for toolchain/smoke checks."
+              echo "NetherSX2_nx_vk_check.nro is NOT a working build - for toolchain checks."
             fi
-            echo "Vulkan NVK backend: $VK"
           } > notes.md
           # shellcheck disable=SC2086
           gh release create "$TAG" --title "$TAG" --notes-file notes.md -R "$GITHUB_REPOSITORY" out/*

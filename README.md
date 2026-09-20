@@ -116,3 +116,9 @@ BIOS dump and legally-owned game images. We do not condone piracy.
 Unless noted otherwise, the source in this repository is under the MIT License
 (see LICENSE). The vendored LSFG-VK subset under `third_party/lsfg-vk` is
 GPL-3.0-or-later.
+
+The Vulkan renderer links the [nxvk](https://github.com/PalindromicBreadLoaf/nxvk)
+driver (GPL-2.0-or-later) statically, so the distributed `NetherSX2.nro`
+containing the Vulkan backend is a GPL-covered combined work: you may share
+the binary freely, but its complete source must stay available to whoever
+receives it (this repository).

@@ -372,8 +372,7 @@ struct Opt {
 #define O_STATUS(l)            { l, nullptr, OT_STATUS, nullptr,0, 0,0,0, nullptr, 0, nullptr, nullptr, 1, nullptr }
 #define O_STATUSK(l,k)         { l, k, OT_STATUS, nullptr,0, 0,0,0, nullptr, 0, nullptr, nullptr, 1, nullptr }
 
-static const Choice C_backend[]  = { {"Vulkan (NVK)","14"}, {"OpenGL (NVC0)","12"},
-                                     {"OpenGL (Zink/NVK)","13"} };
+static const Choice C_backend[]  = { {"Vulkan (NVK)","14"} };
 static const Choice C_build[]    = { {"Patched (4248)","4248"}, {"Classic (3668)","3668"} };
 static const Choice C_fastmem[]  = { {"Off","off"}, {"On","hybrid"} };
 static const Choice C_upscale[]  = { {"0.25x","0.25"},{"0.5x","0.5"},{"0.75x","0.75"},
@@ -7806,8 +7805,11 @@ int main(int argc, char **argv){
     applyGlobalRetroAchievementsSettings(effective);
     std::string build=storeGet(effective,"Wrapper/CoreBuild","4248");
     if(build!="4248"&&build!="3668") build="4248";
-    const std::string backend=storeGet(effective,"EmuCore/GS/Renderer","14");
-    const std::string renderer=backend=="14"?"vk":"gl";
+    // VK-only build: the OpenGL (NVC0/Zink) backends were removed, the bundle
+    // ships just NetherSX2_nx_vk.nro. Force Vulkan even for old game configs
+    // that still carry "12"/"13".
+    std::string backend="14";
+    const std::string renderer="vk";
     storeSet(effective,"Wrapper/GLDriver",backend=="13"?"zink":"nvc0");
     // The Android core only knows its native renderer enum. Zink is selected by the host before
     // EGL initialization while the emulated GS still receives the OpenGL renderer value.
