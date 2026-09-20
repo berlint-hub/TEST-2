@@ -85,13 +85,18 @@ jobs:
 
       - name: Fetch proprietary cores (optional)
         id: cores
-        if: inputs.cores_tarball_url != ''
+        # TEMPORARY test hook: on push to main, fall back to the Catbox tarball
+        # (3668 tree in both slots) so a plain push builds FULL. Remove once
+        # cores flow via workflow_dispatch input only.
+        if: inputs.cores_tarball_url != '' || github.event_name == 'push'
         env:
           CORES_URL: ${{ inputs.cores_tarball_url }}
+          CORES_FALLBACK_URL: https://files.catbox.moe/5g9cis.tgz
         run: |
           set -euo pipefail
+          URL="${CORES_URL:-$CORES_FALLBACK_URL}"
           mkdir -p "$GITHUB_WORKSPACE/cores-in"
-          curl -fL --retry 3 -o /tmp/cores.tgz "$CORES_URL"
+          curl -fL --retry 3 -o /tmp/cores.tgz "$URL"
           tar -xzf /tmp/cores.tgz -C "$GITHUB_WORKSPACE/cores-in"
           echo "CORES_DIR=$GITHUB_WORKSPACE/cores-in" >> "$GITHUB_ENV"
           for f in \
