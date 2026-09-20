@@ -37,6 +37,11 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-22.04
+    # Official devkitPro image (Docker Hub, no Cloudflare block unlike
+    # apt.devkitpro.org which 403s GitHub-runner IPs). Already contains
+    # DEVKITPRO=/opt/devkitpro, dkp-pacman and the A64 toolchain base.
+    container:
+      image: devkitpro/devkita64:20260219
     timeout-minutes: 180
     env:
       DEVKITPRO: /opt/devkitpro
@@ -45,32 +50,27 @@ jobs:
       full: ${{ steps.bundle.outputs.full }}
       vk: ${{ steps.VK.outputs.built }}
     steps:
+      - name: Ensure node/git/cmake for actions
+        run: |
+          set -euo pipefail
+          command -v node >/dev/null 2>&1 || { apt-get update -y && apt-get install -y nodejs; }
+          command -v git >/dev/null 2>&1 || { apt-get update -y && apt-get install -y git; }
+          command -v cmake >/dev/null 2>&1 || { apt-get update -y && apt-get install -y cmake ninja-build; }
+          command -v curl >/dev/null 2>&1 || { apt-get update -y && apt-get install -y curl; }
+          node --version
+          git --version
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install devkitPro pacman
+      - name: Install Switch portlibs
         run: |
           set -euo pipefail
-          sudo apt-get update -y
-          sudo apt-get install -y xz-utils
-          # apt.devkitpro.org sits behind Cloudflare bot protection: default
-          # curl/wget user-agents get HTTP 403. The official installer itself
-          # uses UA "dkp apt" (allowlisted), so we do the same.
-          curl -fsSL -A "dkp apt" -o install-devkitpro-pacman \
-            https://apt.devkitpro.org/install-devkitpro-pacman
-          chmod +x install-devkitpro-pacman
-          sudo ./install-devkitpro-pacman
-          sudo dkp-pacman -Syu --noconfirm
-
-      - name: Install Switch toolchain and portlibs
-        run: |
-          set -euo pipefail
-          sudo dkp-pacman -S --noconfirm --needed \
+          dkp-pacman -Syu --noconfirm
+          dkp-pacman -S --noconfirm --needed \
             devkitA64 switch-tools libnx \
             switch-sdl2 switch-sdl2_ttf switch-sdl2_image \
             switch-curl switch-mesa switch-libdrm_nouveau switch-ntfs-3g
-          sudo apt-get install -y cmake ninja-build git curl
-          echo "/opt/devkitpro/tools/bin" >> "$GITHUB_PATH"
 
       - name: Build storage dependencies (libsmb2, libusbhsfs)
         run: |
