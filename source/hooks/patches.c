@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <switch.h>
 
 #include "../config.h"
 #include "../util.h"
