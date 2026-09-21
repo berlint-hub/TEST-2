@@ -250,9 +250,7 @@ jobs:
           echo "CORES_DIR=$GITHUB_WORKSPACE/cores-in" >> "$GITHUB_ENV"
           for f in \
             "NetherSX2-v2.2n-4248/lib/arm64-v8a/libemucore.so" \
-            "NetherSX2-v2.2n-4248/assets/GameIndex.yaml" \
-            "NetherSX2-v2.2n-3668/lib/arm64-v8a/libemucore.so" \
-            "NetherSX2-v2.2n-3668/assets/GameIndex.yaml"; do
+            "NetherSX2-v2.2n-4248/assets/GameIndex.yaml"; do
             test -f "$GITHUB_WORKSPACE/cores-in/$f" || { echo "Missing: $f" >&2; exit 1; }
           done
 

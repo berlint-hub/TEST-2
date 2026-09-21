@@ -55,7 +55,7 @@ static const char *GAMECFG_DIR= "sdmc:/switch/nethersx2/gamecfg";
 static const char *GAMECRC_DIR= "sdmc:/switch/nethersx2/gamecrc";
 static const char *CHEATS_DIR = "sdmc:/switch/nethersx2/cheats";
 static const char *TEXTURES_DIR = "sdmc:/switch/nethersx2/textures";
-static const char *DEF_GAMEDIR= "sdmc:/switch/nethersx2/games";
+static const char *DEF_GAMEDIR= "sdmc:/Roms/PS2";
 static const char *BIOS_DIR   = "sdmc:/switch/nethersx2/bios";
 static const char *RESOURCES_DIR = "sdmc:/switch/nethersx2/resources";
 static const char *LSFG_DIR = "sdmc:/switch/nethersx2/lsfg";
@@ -373,7 +373,7 @@ struct Opt {
 #define O_STATUSK(l,k)         { l, k, OT_STATUS, nullptr,0, 0,0,0, nullptr, 0, nullptr, nullptr, 1, nullptr }
 
 static const Choice C_backend[]  = { {"Vulkan (NVK)","14"} };
-static const Choice C_build[]    = { {"Patched (4248)","4248"}, {"Classic (3668)","3668"} };
+static const Choice C_build[]    = { {"Patched (4248)","4248"} };
 static const Choice C_fastmem[]  = { {"Off","off"}, {"On","hybrid"} };
 static const Choice C_upscale[]  = { {"0.25x","0.25"},{"0.5x","0.5"},{"0.75x","0.75"},
                                      {"1x (native ~480p)","1"},{"1.25x","1.25"},{"1.5x","1.5"},{"1.75x","1.75"},
@@ -7803,8 +7803,9 @@ int main(int argc, char **argv){
     removeLegacySmcSettings(effective);
     removeLegacyCheatGate(effective);
     applyGlobalRetroAchievementsSettings(effective);
-    std::string build=storeGet(effective,"Wrapper/CoreBuild","4248");
-    if(build!="4248"&&build!="3668") build="4248";
+    // Single-core build: only the 4248 slot is bundled (same binary).
+    // Forced even for old game configs that still carry "3668".
+    std::string build="4248";
     // VK-only build: the OpenGL (NVC0/Zink) backends were removed, the bundle
     // ships just NetherSX2_nx_vk.nro. Force Vulkan even for old game configs
     // that still carry "12"/"13".

@@ -19,8 +19,6 @@ NXVK_SDK_ROOT="${NXVK_SDK_ROOT:-$APP/nxvk-sdk}"
 required=(
   "$CORES_DIR/NetherSX2-v2.2n-4248/lib/arm64-v8a/libemucore.so"
   "$CORES_DIR/NetherSX2-v2.2n-4248/assets/GameIndex.yaml"
-  "$CORES_DIR/NetherSX2-v2.2n-3668/lib/arm64-v8a/libemucore.so"
-  "$CORES_DIR/NetherSX2-v2.2n-3668/assets/GameIndex.yaml"
 )
 if [[ -n "$NXVK_SDK_ROOT" ]]; then
   required+=(
@@ -61,24 +59,24 @@ cmake --build "$DEPS_BUILD" --parallel "$JOBS"
 echo "==== emulator: Vulkan (nxvk) ===="
 cd "$APP"
 export NXVK_SDK_ROOT
+# TEMP debug phase: Vulkan call tracing to /switch/nethersx2/nethersx2-vulkan.log
+# + Mesa log. Revert to unset once the black-screen issue is diagnosed.
+export NETHERSX2_VK_DIAGNOSTIC=1
 make clean >/dev/null 2>&1
 make -j"$JOBS"
 EMU_NRO="$(ls -t ./*.nro | head -n 1)"
 cp -f "$EMU_NRO" NetherSX2_nx_vk.nro
 
-echo "==== bundle cores + emulator binary into the launcher romfs ===="
+echo "==== bundle single core + emulator binary into the launcher romfs ===="
 mkdir -p "$APP/launcher/romfs/cores" "$APP/launcher/romfs/emu"
 cp -f "$CORES_DIR/NetherSX2-v2.2n-4248/lib/arm64-v8a/libemucore.so" "$APP/launcher/romfs/cores/emucore_4248.so"
-cp -f "$CORES_DIR/NetherSX2-v2.2n-3668/lib/arm64-v8a/libemucore.so" "$APP/launcher/romfs/cores/emucore_3668.so"
 cp -f "$APP/NetherSX2_nx_vk.nro" "$APP/launcher/romfs/emu/NetherSX2_nx_vk.nro"
 
-echo "==== bundle per-build resources into the launcher romfs ===="
-for b in 4248 3668; do
-  rd="$APP/launcher/romfs/res/$b"
-  rm -rf "$rd"; mkdir -p "$rd"
-  cp -rf "$CORES_DIR/NetherSX2-v2.2n-$b/assets/." "$rd/"
-  rm -rf "$rd/dexopt"
-done
+echo "==== bundle resources into the launcher romfs ===="
+rd="$APP/launcher/romfs/res/4248"
+rm -rf "$rd"; mkdir -p "$rd"
+cp -rf "$CORES_DIR/NetherSX2-v2.2n-4248/assets/." "$rd/"
+rm -rf "$rd/dexopt"
 
 echo "==== forwarder stub (built in-tree from launcher/fwd/) ===="
 make -C "$APP/launcher/fwd" clean >/dev/null 2>&1
