@@ -1881,8 +1881,9 @@ int main(void) {
   cpu_boost(1);
 
   // Keep Mesa's disk cache next to our data, not in sdmc:/switch.
-  // (XDG unset on Horizon -> mesa would default under sdmc:/switch.)
+  // (Neither XDG nor HOME is set on Horizon; Mesa falls back to the CWD.)
   setenv("XDG_CACHE_HOME", DATA_ROOT, 1);
+  setenv("HOME", DATA_ROOT, 1);
 
   // settings store: load nethersx2.ini + seed OpenGL/folder defaults
   prefs_init(PREFS_PATH);
