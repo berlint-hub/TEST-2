@@ -142,7 +142,6 @@ jobs:
           mkdir -p sdk-stage/include
           cp -r nxvk/include/vulkan nxvk/include/vk_video sdk-stage/include/
           tar -czf nxvk-sdk.tgz -C sdk-stage .
-          tar -tzf nxvk-sdk.tgz | head -20
           ls -la nxvk-sdk.tgz
 
       - name: Upload nxvk SDK
