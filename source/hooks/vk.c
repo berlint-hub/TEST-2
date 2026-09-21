@@ -745,6 +745,41 @@ vkQueuePresentKHR_native(VkQueue queue, const VkPresentInfoKHR *present_info) {
     vk_diag_note("vkQueuePresentKHR call=%d swaps=%u result=%d",
                  vk_present_count,
                  present_info ? present_info->swapchainCount : 0, result);
+  // Per-present notes stop after boot (log size), but gameplay FPS must stay
+  // visible: every 120 presents log avg/min/max FPS of the window. This is
+  // what actually measures P3/P4 gains (and disproves phantom "hangs").
+  {
+    static int last_logged = 0;
+    static struct timespec last_ts = { 0, 0 };
+    static struct timespec prev_ts = { 0, 0 };
+    static double win_min = 0.0, win_max = 0.0;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if (prev_ts.tv_sec) {
+      const double d = (now.tv_sec - prev_ts.tv_sec) +
+                       (now.tv_nsec - prev_ts.tv_nsec) / 1e9;
+      if (d > 0.0) {
+        if (!win_min || d < win_min) win_min = d;
+        if (d > win_max) win_max = d;
+      }
+    }
+    prev_ts = now;
+    if (vk_present_count - last_logged >= 120) {
+      if (last_ts.tv_sec) {
+        const double dt = (now.tv_sec - last_ts.tv_sec) +
+                          (now.tv_nsec - last_ts.tv_nsec) / 1e9;
+        if (dt > 0.0)
+          vk_diag_note("fps avg=%.1f min=%.1f max=%.1f over %d presents (total=%d)",
+                       (vk_present_count - last_logged) / dt,
+                       win_max > 0.0 ? 1.0 / win_max : 0.0,
+                       win_min > 0.0 ? 1.0 / win_min : 0.0,
+                       vk_present_count - last_logged, vk_present_count);
+      }
+      last_ts = now;
+      last_logged = vk_present_count;
+      win_min = win_max = 0.0;
+    }
+  }
 #endif
   return result;
 }
