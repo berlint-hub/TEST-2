@@ -135,7 +135,14 @@ jobs:
       - name: Pack SDK artifact
         run: |
           set -euo pipefail
-          tar -czf nxvk-sdk.tgz -C nxvk/switch/build/pkg .
+          # `package` stages only lib/ + pkgconfig; headers ship from the
+          # repo (their `install` does `cp -r include/vulkan include/vk_video`).
+          mkdir -p sdk-stage
+          cp -r nxvk/switch/build/pkg/* sdk-stage/
+          mkdir -p sdk-stage/include
+          cp -r nxvk/include/vulkan nxvk/include/vk_video sdk-stage/include/
+          tar -czf nxvk-sdk.tgz -C sdk-stage .
+          tar -tzf nxvk-sdk.tgz | head -20
           ls -la nxvk-sdk.tgz
 
       - name: Upload nxvk SDK
