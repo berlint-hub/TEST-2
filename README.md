@@ -121,4 +121,5 @@ The Vulkan renderer links the [nxvk](https://github.com/PalindromicBreadLoaf/nxv
 driver (GPL-2.0-or-later) statically, so the distributed `NetherSX2.nro`
 containing the Vulkan backend is a GPL-covered combined work: you may share
 the binary freely, but its complete source must stay available to whoever
-receives it (this repository).
+receives it (this repository). `source/hooks/nvk_compat.c` is vendored
+verbatim from nxvk (same licence, see its header).

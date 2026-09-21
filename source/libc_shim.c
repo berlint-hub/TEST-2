@@ -491,6 +491,40 @@ int posix_memalign_fake(void **out, size_t align, size_t size) {
   return 0;
 }
 
+// newlib has no writev(); libsmb2 needs it for socket writes.
+// Straightforward gather-write loop; iovec layout matches POSIX ABI.
+#if __has_include(<sys/uio.h>)
+#include <sys/uio.h>
+#else
+struct iovec {
+  void *iov_base;
+  size_t iov_len;
+};
+#endif
+
+ssize_t writev(int fd, const struct iovec *iov, int iovcnt) {
+  if (iovcnt < 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  ssize_t total = 0;
+  for (int i = 0; i < iovcnt; i++) {
+    size_t left = iov[i].iov_len;
+    const uint8_t *p = (const uint8_t *)iov[i].iov_base;
+    while (left) {
+      const ssize_t w = write(fd, p, left);
+      if (w < 0)
+        return total ? total : -1;
+      if (w == 0)
+        return total;
+      total += w;
+      p += w;
+      left -= (size_t)w;
+    }
+  }
+  return total;
+}
+
 // ---------------------------------------------------------------------------
 // filesystem odds and ends
 // ---------------------------------------------------------------------------
