@@ -233,14 +233,30 @@ static int find_queue_family(VkQueue queue, uint32_t *family) {
   return 0;
 }
 
+// nxvk exports only vk_icdGetInstanceProcAddr: resolve every driver entry
+// point the old direct link provided through the tracked instance at runtime.
+// All call sites below run after instance creation.
+static PFN_vkVoidFunction vk_driver_proc(const char *name) {
+  PFN_vkVoidFunction fn = NULL;
+  if (tracked_instance)
+    fn = vkGetInstanceProcAddr(tracked_instance, name);
+  if (!fn)
+    fn = vkGetInstanceProcAddr(NULL, name);
+  return fn;
+}
+
 static int has_device_extension(VkPhysicalDevice physical_device,
                                 const char *wanted) {
+  PFN_vkEnumerateDeviceExtensionProperties enum_fn =
+      (PFN_vkEnumerateDeviceExtensionProperties)
+          vk_driver_proc("vkEnumerateDeviceExtensionProperties");
+  if (!enum_fn) return 0;
   uint32_t count = 0;
-  if (vkEnumerateDeviceExtensionProperties(physical_device, NULL, &count, NULL) != VK_SUCCESS)
+  if (enum_fn(physical_device, NULL, &count, NULL) != VK_SUCCESS)
     return 0;
   VkExtensionProperties *properties = count ? malloc(sizeof(*properties) * count) : NULL;
   if (count && !properties) return 0;
-  VkResult result = vkEnumerateDeviceExtensionProperties(
+  VkResult result = enum_fn(
       physical_device, NULL, &count, properties);
   int found = 0;
   if (result == VK_SUCCESS || result == VK_INCOMPLETE) {
@@ -266,13 +282,17 @@ static VkResult find_lsfg_main_queue_family(
     VkPhysicalDevice physical_device,
     const VkDeviceCreateInfo *create_info,
     uint32_t *main_family) {
+  PFN_vkGetPhysicalDeviceQueueFamilyProperties qfp_fn =
+      (PFN_vkGetPhysicalDeviceQueueFamilyProperties)
+          vk_driver_proc("vkGetPhysicalDeviceQueueFamilyProperties");
+  if (!qfp_fn) return VK_ERROR_FEATURE_NOT_PRESENT;
   uint32_t count = 0;
-  vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &count, NULL);
+  qfp_fn(physical_device, &count, NULL);
   if (!count) return VK_ERROR_FEATURE_NOT_PRESENT;
 
   VkQueueFamilyProperties *properties = malloc(sizeof(*properties) * count);
   if (!properties) return VK_ERROR_OUT_OF_HOST_MEMORY;
-  vkGetPhysicalDeviceQueueFamilyProperties(physical_device, &count, properties);
+  qfp_fn(physical_device, &count, properties);
 
   uint32_t main = VK_QUEUE_FAMILY_IGNORED;
 
@@ -358,7 +378,10 @@ vkCreateAndroidSurfaceKHR_shim(VkInstance inst,
       .flags  = 0,
       .window = (void *)ci->window, // NWindow* -- no conversion
   };
-  VkResult r = vkCreateViSurfaceNN(inst, &vi, alloc, out);
+  PFN_vkCreateViSurfaceNN vi_fn = (PFN_vkCreateViSurfaceNN)
+      vkGetInstanceProcAddr(inst, "vkCreateViSurfaceNN");
+  if (!vi_fn) return VK_ERROR_INITIALIZATION_FAILED;
+  VkResult r = vi_fn(inst, &vi, alloc, out);
 
 #ifdef NETHERSX2_VK_DIAGNOSTIC
   vk_diag_note("vkCreateViSurfaceNN window=%p result=%d surface=%p",
@@ -381,7 +404,8 @@ vkCreateDevice_shim(VkPhysicalDevice physical_device,
                (void *)physical_device, create_info->queueCreateInfoCount,
                create_info->enabledExtensionCount, lsfg_session_prepared);
 #endif
-  PFN_vkCreateDevice create_fn = real_create_device ? real_create_device : vkCreateDevice;
+  PFN_vkCreateDevice create_fn = real_create_device ? real_create_device :
+      (PFN_vkCreateDevice)vk_driver_proc("vkCreateDevice");
   int prepare_lsfg = lsfg_session_prepared;
   if (prepare_lsfg && !file_readable(lsfg_dll_path())) {
     prepare_lsfg = 0;
@@ -507,7 +531,7 @@ static void VKAPI_CALL
 vkGetDeviceQueue_shim(VkDevice device, uint32_t queue_family_index,
                       uint32_t queue_index, VkQueue *out) {
   PFN_vkGetDeviceQueue get_fn = real_get_device_queue ?
-      real_get_device_queue : vkGetDeviceQueue;
+      real_get_device_queue : (PFN_vkGetDeviceQueue)vk_driver_proc("vkGetDeviceQueue");
   get_fn(device, queue_family_index, queue_index, out);
   if (out) remember_queue(*out, queue_family_index);
 #ifdef NETHERSX2_VK_DIAGNOSTIC
@@ -520,7 +544,7 @@ static void VKAPI_CALL
 vkGetDeviceQueue2_shim(VkDevice device, const VkDeviceQueueInfo2 *queue_info,
                        VkQueue *out) {
   PFN_vkGetDeviceQueue2 get_fn = real_get_device_queue2 ?
-      real_get_device_queue2 : vkGetDeviceQueue2;
+      real_get_device_queue2 : (PFN_vkGetDeviceQueue2)vk_driver_proc("vkGetDeviceQueue2");
   get_fn(device, queue_info, out);
   if (queue_info && out) remember_queue(*out, queue_info->queueFamilyIndex);
 #ifdef NETHERSX2_VK_DIAGNOSTIC
@@ -535,7 +559,8 @@ vkGetDeviceQueue2_shim(VkDevice device, const VkDeviceQueueInfo2 *queue_info,
 static VkResult VKAPI_CALL
 vkQueueSubmit_shim(VkQueue queue, uint32_t submit_count,
                    const VkSubmitInfo *submits, VkFence fence) {
-  PFN_vkQueueSubmit submit = real_queue_submit ? real_queue_submit : vkQueueSubmit;
+  PFN_vkQueueSubmit submit = real_queue_submit ? real_queue_submit :
+      (PFN_vkQueueSubmit)vk_driver_proc("vkQueueSubmit");
   VkResult result = submit(queue, submit_count, submits, fence);
   const unsigned call = ++vk_diag_submit_calls;
   if (call <= 3 || result != VK_SUCCESS)
@@ -547,7 +572,8 @@ vkQueueSubmit_shim(VkQueue queue, uint32_t submit_count,
 static VkResult VKAPI_CALL
 vkQueueSubmit2_shim(VkQueue queue, uint32_t submit_count,
                     const VkSubmitInfo2 *submits, VkFence fence) {
-  PFN_vkQueueSubmit2 submit = real_queue_submit2 ? real_queue_submit2 : vkQueueSubmit2;
+  PFN_vkQueueSubmit2 submit = real_queue_submit2 ? real_queue_submit2 :
+      (PFN_vkQueueSubmit2)vk_driver_proc("vkQueueSubmit2");
   VkResult result = submit(queue, submit_count, submits, fence);
   const unsigned call = ++vk_diag_submit2_calls;
   if (call <= 3 || result != VK_SUCCESS)
@@ -561,7 +587,7 @@ vkAcquireNextImageKHR_shim(VkDevice device, VkSwapchainKHR swapchain,
                            uint64_t timeout, VkSemaphore semaphore,
                            VkFence fence, uint32_t *image_index) {
   PFN_vkAcquireNextImageKHR acquire = real_acquire_next_image ?
-      real_acquire_next_image : vkAcquireNextImageKHR;
+      real_acquire_next_image : (PFN_vkAcquireNextImageKHR)vk_driver_proc("vkAcquireNextImageKHR");
   VkResult result = acquire(device, swapchain, timeout, semaphore, fence,
                             image_index);
   const unsigned call = ++vk_diag_acquire_calls;
@@ -578,7 +604,8 @@ static VkResult VKAPI_CALL
 vkGetSwapchainImagesKHR_shim(VkDevice device, VkSwapchainKHR swapchain,
                              uint32_t *count, VkImage *images) {
   PFN_vkGetSwapchainImagesKHR get_images = real_get_swapchain_images ?
-      real_get_swapchain_images : vkGetSwapchainImagesKHR;
+      real_get_swapchain_images :
+      (PFN_vkGetSwapchainImagesKHR)vk_driver_proc("vkGetSwapchainImagesKHR");
   VkResult result = get_images(device, swapchain, count, images);
   const unsigned call = ++vk_diag_swapchain_image_calls;
   if (call <= 4 || (result != VK_SUCCESS && result != VK_INCOMPLETE))
@@ -601,7 +628,7 @@ vkCreateSwapchainKHR_shim(VkDevice device,
                create_info->minImageCount, create_info->presentMode);
 #endif
   PFN_vkCreateSwapchainKHR create_fn = real_create_swapchain ?
-      real_create_swapchain : vkCreateSwapchainKHR;
+      real_create_swapchain : (PFN_vkCreateSwapchainKHR)vk_driver_proc("vkCreateSwapchainKHR");
 
   if (create_info->oldSwapchain == tracked_swapchain)
     reset_tracked_swapchain();
@@ -620,11 +647,18 @@ vkCreateSwapchainKHR_shim(VkDevice device,
     VkSurfaceCapabilitiesKHR capabilities;
     VkFormatProperties swapchain_properties;
     VkFormatProperties rgba_properties;
-    VkResult cap_result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+    PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR caps_fn =
+        (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)
+            vk_driver_proc("vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+    PFN_vkGetPhysicalDeviceFormatProperties fmt_fn =
+        (PFN_vkGetPhysicalDeviceFormatProperties)
+            vk_driver_proc("vkGetPhysicalDeviceFormatProperties");
+    if (!caps_fn || !fmt_fn) return VK_ERROR_FEATURE_NOT_PRESENT;
+    VkResult cap_result = caps_fn(
         tracked_physical_device, create_info->surface, &capabilities);
-    vkGetPhysicalDeviceFormatProperties(tracked_physical_device,
+    fmt_fn(tracked_physical_device,
         create_info->imageFormat, &swapchain_properties);
-    vkGetPhysicalDeviceFormatProperties(tracked_physical_device,
+    fmt_fn(tracked_physical_device,
         VK_FORMAT_R8G8B8A8_UNORM, &rgba_properties);
     const VkImageUsageFlags transfer_usage =
         VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
@@ -676,7 +710,7 @@ vkDestroySwapchainKHR_shim(VkDevice device, VkSwapchainKHR swapchain,
 #endif
   if (swapchain == tracked_swapchain) reset_tracked_swapchain();
   PFN_vkDestroySwapchainKHR destroy_fn = real_destroy_swapchain ?
-      real_destroy_swapchain : vkDestroySwapchainKHR;
+      real_destroy_swapchain : (PFN_vkDestroySwapchainKHR)vk_driver_proc("vkDestroySwapchainKHR");
   destroy_fn(device, swapchain, alloc);
 }
 
@@ -694,7 +728,7 @@ vkDestroyDevice_shim(VkDevice device, const VkAllocationCallbacks *alloc) {
     lsfg_device_capable = 0;
   }
   PFN_vkDestroyDevice destroy_fn = real_destroy_device ?
-      real_destroy_device : vkDestroyDevice;
+      real_destroy_device : (PFN_vkDestroyDevice)vk_driver_proc("vkDestroyDevice");
   destroy_fn(device, alloc);
 }
 
@@ -703,7 +737,8 @@ static PFN_vkQueuePresentKHR real_qpresent = NULL;
 
 static VkResult
 vkQueuePresentKHR_native(VkQueue queue, const VkPresentInfoKHR *present_info) {
-  PFN_vkQueuePresentKHR present = real_qpresent ? real_qpresent : vkQueuePresentKHR;
+  PFN_vkQueuePresentKHR present = real_qpresent ? real_qpresent :
+      (PFN_vkQueuePresentKHR)vk_driver_proc("vkQueuePresentKHR");
   VkResult result = present(queue, present_info);
 #ifdef NETHERSX2_VK_DIAGNOSTIC
   if (vk_present_count <= 4 || result != VK_SUCCESS)
@@ -726,7 +761,8 @@ static int lsfg_try_create(VkQueue queue) {
   if (queue_family != lsfg_main_queue_family) return 0;
 
   PFN_vkGetSwapchainImagesKHR get_images = real_get_swapchain_images ?
-      real_get_swapchain_images : vkGetSwapchainImagesKHR;
+      real_get_swapchain_images :
+      (PFN_vkGetSwapchainImagesKHR)vk_driver_proc("vkGetSwapchainImagesKHR");
   uint32_t image_count = 0;
   VkResult result = get_images(tracked_device, tracked_swapchain,
                                &image_count, NULL);
@@ -864,7 +900,10 @@ vkGetPhysicalDeviceMemoryProperties2_shim(VkPhysicalDevice pd,
 // NVK's real GDPA unchanged.
 static PFN_vkVoidFunction VKAPI_CALL
 vk_gdpa_hook(VkDevice dev, const char *name) {
-  PFN_vkVoidFunction fn = vkGetDeviceProcAddr(dev, name);
+  static PFN_vkGetDeviceProcAddr real_gdpa = NULL;
+  if (!real_gdpa)
+    real_gdpa = (PFN_vkGetDeviceProcAddr)vk_driver_proc("vkGetDeviceProcAddr");
+  PFN_vkVoidFunction fn = real_gdpa ? real_gdpa(dev, name) : NULL;
   if (!name) return fn;
 #ifdef NETHERSX2_VK_DIAGNOSTIC
   if (!strcmp(name, "vkQueueSubmit")) {
@@ -997,13 +1036,17 @@ vk_gipa_hook(VkInstance inst, const char *name) {
 VkResult VKAPI_CALL
 vkEnumerateInstanceExtensionProperties_hook(const char *layer, uint32_t *pCount,
                                             VkExtensionProperties *pProps) {
+  PFN_vkEnumerateInstanceExtensionProperties enum_fn =
+      (PFN_vkEnumerateInstanceExtensionProperties)
+          vk_driver_proc("vkEnumerateInstanceExtensionProperties");
+  if (!enum_fn) return VK_ERROR_INITIALIZATION_FAILED;
   if (pProps == NULL) {
-    VkResult r = vkEnumerateInstanceExtensionProperties(layer, pCount, NULL);
+    VkResult r = enum_fn(layer, pCount, NULL);
     if (r == VK_SUCCESS) (*pCount)++; // reserve a slot for the injected name
     return r;
   }
   uint32_t want = *pCount, got = want ? want - 1 : 0;
-  VkResult r = vkEnumerateInstanceExtensionProperties(layer, &got, pProps);
+  VkResult r = enum_fn(layer, &got, pProps);
   if (r != VK_SUCCESS && r != VK_INCOMPLETE) return r;
   VkExtensionProperties inj = { VK_KHR_ANDROID_SURFACE_EXTENSION_NAME, 6 };
   if (got < want) { pProps[got++] = inj; *pCount = got; return VK_SUCCESS; }

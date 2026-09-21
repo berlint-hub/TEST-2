@@ -22,4 +22,41 @@ EGLContext eglGetCurrentContext(void) { return EGL_NO_CONTEXT; }
 EGLSurface eglGetCurrentSurface(EGLint rw) { (void)rw; return EGL_NO_SURFACE; }
 const GLubyte *glGetString(GLenum name) { (void)name; return (const GLubyte *)""; }
 
+/* nxvk provides no EGL at all (unlike the Dantiicu package, whose
+ * rust_switch_stubs carried most egl* symbols). On the Vulkan renderer path
+ * the core drives GSDeviceVK and never calls EGL -- our hooks/egl.c layer
+ * still references the real entry points, so they must exist and fail
+ * benignly for the link to resolve. */
+EGLDisplay eglGetDisplay(EGLNativeDisplayType d) { (void)d; return EGL_NO_DISPLAY; }
+EGLBoolean eglInitialize(EGLDisplay d, EGLint *ma, EGLint *mi) {
+  (void)d; (void)ma; (void)mi; return EGL_FALSE; }
+EGLBoolean eglBindAPI(EGLenum api) { (void)api; return EGL_FALSE; }
+const char *eglQueryString(EGLDisplay d, EGLint n) { (void)d; (void)n; return NULL; }
+EGLBoolean eglChooseConfig(EGLDisplay d, const EGLint *al, EGLConfig *c,
+                           EGLint s, EGLint *n) {
+  (void)d; (void)al; (void)c; (void)s; if (n) *n = 0; return EGL_FALSE; }
+EGLBoolean eglGetConfigAttrib(EGLDisplay d, EGLConfig c, EGLint a, EGLint *v) {
+  (void)d; (void)c; (void)a; if (v) *v = 0; return EGL_FALSE; }
+EGLContext eglCreateContext(EGLDisplay d, EGLConfig c, EGLContext s,
+                            const EGLint *a) {
+  (void)d; (void)c; (void)s; (void)a; return EGL_NO_CONTEXT; }
+EGLSurface eglCreateWindowSurface(EGLDisplay d, EGLConfig c,
+                                  EGLNativeWindowType w, const EGLint *a) {
+  (void)d; (void)c; (void)w; (void)a; return EGL_NO_SURFACE; }
+EGLSurface eglCreatePbufferSurface(EGLDisplay d, EGLConfig c, const EGLint *a) {
+  (void)d; (void)c; (void)a; return EGL_NO_SURFACE; }
+EGLBoolean eglDestroySurface(EGLDisplay d, EGLSurface s) {
+  (void)d; (void)s; return EGL_FALSE; }
+EGLBoolean eglDestroyContext(EGLDisplay d, EGLContext c) {
+  (void)d; (void)c; return EGL_FALSE; }
+EGLBoolean eglMakeCurrent(EGLDisplay d, EGLSurface dr, EGLSurface r, EGLContext c) {
+  (void)d; (void)dr; (void)r; (void)c; return EGL_FALSE; }
+EGLBoolean eglSwapInterval(EGLDisplay d, EGLint i) { (void)d; (void)i; return EGL_FALSE; }
+EGLBoolean eglSwapBuffers(EGLDisplay d, EGLSurface s) {
+  (void)d; (void)s; return EGL_FALSE; }
+void *eglGetProcAddress(const char *n) { (void)n; return NULL; }
+EGLBoolean eglTerminate(EGLDisplay d) { (void)d; return EGL_FALSE; }
+EGLBoolean eglReleaseThread(void) { return EGL_FALSE; }
+EGLint eglGetError(void) { return EGL_SUCCESS; }
+
 #endif // USE_VULKAN
