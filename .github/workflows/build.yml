@@ -66,13 +66,21 @@ jobs:
           df -h /
 
       - name: Checkout nxvk (pinned)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: PalindromicBreadLoaf/nxvk
           ref: ${{ env.NXVK_REV }}
           path: nxvk
 
+      - name: Restore nxvk SDK from cache
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: nxvk-sdk.tgz
+          key: nxvk-sdk-${{ env.NXVK_REV }}
+
       - name: Install nxvk build deps (mirrors switch/docker/Dockerfile)
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           apt-get update -y
@@ -91,6 +99,7 @@ jobs:
           rm -rf /var/lib/apt/lists/*
 
       - name: Install Rust toolchain (mirrors Dockerfile)
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           export PATH="/opt/rust/cargo/bin:$PATH"
@@ -102,6 +111,7 @@ jobs:
           rustc --version; cargo --version
 
       - name: Dockerfile-equivalent host setup
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           export PATH="/opt/rust/cargo/bin:$PATH"
@@ -120,6 +130,7 @@ jobs:
           echo "/opt/rust/cargo/bin" >> "$GITHUB_PATH"
 
       - name: Build + stage Vulkan package
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           # nxvk scripts hardcode the repo at /work (their docker bind-mount).
@@ -133,6 +144,7 @@ jobs:
           du -sh switch/build/pkg
 
       - name: Pack SDK artifact
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           # `package` stages only lib/ + pkgconfig; headers ship from the
@@ -178,7 +190,7 @@ jobs:
           git --version
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download nxvk SDK
         uses: actions/download-artifact@v4
@@ -199,17 +211,26 @@ jobs:
       - name: Install Switch portlibs
         run: |
           set -euo pipefail
-          # pkg.devkitpro.org sporadically 403s GitHub-runner IPs: retry sync.
-          for i in 1 2 3 4 5; do
-            dkp-pacman -Syu --noconfirm && break
-            echo "dkp sync attempt $i failed, retrying in 30s..."
-            sleep 30
-            [ "$i" -lt 5 ] || exit 1
+          # pkg.devkitpro.org sporadically 403s GitHub-runner IPs: retry the
+          # whole sync+install a few times before giving up.
+          for attempt in 1 2 3; do
+            SYNC_OK=1
+            for i in 1 2 3 4 5; do
+              dkp-pacman -Syu --noconfirm && SYNC_OK=0 && break
+              echo "dkp sync attempt $i failed, retrying in 30s..."
+              sleep 30
+            done
+            [ "$SYNC_OK" -eq 0 ] || { echo "sync keeps failing"; sleep 60; continue; }
+            if dkp-pacman -S --noconfirm --needed \
+              devkitA64 switch-tools libnx \
+              switch-sdl2 switch-sdl2_ttf switch-sdl2_image \
+              switch-curl switch-mesa switch-libdrm_nouveau switch-ntfs-3g; then
+              break
+            fi
+            echo "portlibs install attempt $attempt failed, retrying in 60s..."
+            sleep 60
+            [ "$attempt" -lt 3 ] || exit 1
           done
-          dkp-pacman -S --noconfirm --needed \
-            devkitA64 switch-tools libnx \
-            switch-sdl2 switch-sdl2_ttf switch-sdl2_image \
-            switch-curl switch-mesa switch-libdrm_nouveau switch-ntfs-3g
 
       - name: Fetch proprietary cores (optional)
         id: cores
