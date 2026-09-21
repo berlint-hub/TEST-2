@@ -194,7 +194,52 @@ static int fallocate_fake(int fd, int mode, off_t off, off_t len) {
   return ftruncate(fd, off + len);
 }
 static int sched_setaffinity_fake(int pid, size_t sz, const void *mask) {
-  (void)pid; (void)sz; (void)mask; return 0; // core pins its own threads via libnx
+  // Honor the core's affinity requests instead of ignoring them: the core
+  // knows which thread is EE/VU/GS. Translate the requested Linux CPU set
+  // onto Horizon's available cores (3 normally, 4 with a 4-core forwarder)
+  // so the MTVU thread stops migrating (cache thrash = stutter).
+  // Only self-pinning is supported; anything else is a benign no-op.
+  if ((pid != 0 && pid != gettid_fake()) || !mask || sz == 0) {
+    errno = EINVAL;
+    return -1;
+  }
+  uint64_t req = 0;
+  memcpy(&req, mask, sz > sizeof(req) ? sizeof(req) : sz);
+  if (!req)
+    return 0; // empty set: change nothing, report success like Linux
+  u64 avail = 0;
+  if (R_FAILED(svcGetInfo(&avail, InfoType_CoreMask, CUR_PROCESS_HANDLE, 0)) ||
+      !avail) {
+    errno = EINVAL;
+    return -1;
+  }
+  // i-th requested CPU -> i-th available core (wraps), so distinct requests
+  // stay on distinct cores like on the core's native platform.
+  const unsigned navail = __builtin_popcountll(avail);
+  unsigned cores[64];
+  unsigned ncore = 0;
+  for (unsigned core = 0; core < 64; core++)
+    if (avail & (1ULL << core))
+      cores[ncore++] = core;
+  u64 hmask = 0;
+  unsigned slot = 0;
+  for (unsigned cpu = 0; cpu < 64; cpu++) {
+    if (!(req & (1ULL << cpu)))
+      continue;
+    hmask |= 1ULL << cores[slot % navail];
+    slot++;
+  }
+  // Clip to the worker pool: a translated request must never steal the EE
+  // core. If nothing remains, keep the trampoline pin and report success.
+  hmask &= pthr_worker_mask();
+  if (!hmask)
+    return 0;
+  const int pref = __builtin_ctzll(hmask);
+  if (R_FAILED(svcSetThreadCoreMask(CUR_THREAD_HANDLE, pref, (u32)hmask))) {
+    errno = EINVAL;
+    return -1;
+  }
+  return 0;
 }
 
 static void abort_fake(void) {

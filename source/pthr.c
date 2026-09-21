@@ -192,6 +192,15 @@ void pthr_pin_ee_core(void) {
 
 }
 
+// Worker pool mask for sched_setaffinity translation (see imports.c).
+unsigned pthr_worker_mask(void) {
+  mutexLock(&core_lock);
+  core_init_once();
+  const unsigned m = work_mask;
+  mutexUnlock(&core_lock);
+  return m;
+}
+
 // heavy emucore threads (MTGS, VU1, ring/texture workers): distinct preferred
 // core round-robined over the work pool; work_mask lets a light worker migrate
 // off a heavy peer's core but never onto the EE core.

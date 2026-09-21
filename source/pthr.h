@@ -67,6 +67,11 @@ void pthr_set_priority(int priority);
 
 void pthr_pin_ee_core(void);
 
+// Worker pool mask (hot cores minus the EE core) for affinity translation:
+// the core's own sched_setaffinity wishes are honored only inside this mask
+// so a translated request can never steal the EE core.
+unsigned pthr_worker_mask(void);
+
 void pthr_ensure_fake_tls(void);
 
 #endif
