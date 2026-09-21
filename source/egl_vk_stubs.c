@@ -15,6 +15,7 @@
 
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
+#include <stddef.h>
 
 EGLBoolean eglQuerySurface(EGLDisplay d, EGLSurface s, EGLint a, EGLint *v) {
   (void)d; (void)s; (void)a; if (v) *v = 0; return EGL_FALSE; }
@@ -54,7 +55,8 @@ EGLBoolean eglMakeCurrent(EGLDisplay d, EGLSurface dr, EGLSurface r, EGLContext 
 EGLBoolean eglSwapInterval(EGLDisplay d, EGLint i) { (void)d; (void)i; return EGL_FALSE; }
 EGLBoolean eglSwapBuffers(EGLDisplay d, EGLSurface s) {
   (void)d; (void)s; return EGL_FALSE; }
-void *eglGetProcAddress(const char *n) { (void)n; return NULL; }
+__eglMustCastToProperFunctionPointerType eglGetProcAddress(const char *n) {
+  (void)n; return NULL; }
 EGLBoolean eglTerminate(EGLDisplay d) { (void)d; return EGL_FALSE; }
 EGLBoolean eglReleaseThread(void) { return EGL_FALSE; }
 EGLint eglGetError(void) { return EGL_SUCCESS; }
