@@ -115,6 +115,19 @@ vk_diag_exception(uint64_t pc, uint64_t far, uint32_t esr,
     fsync(fd);
     close(fd);
   }
+  // Mirror into the vulkan log: the OSD-exit crash shows no Atmosphere fatal
+  // report (plain app error dialog), so the shutdown trace + this line in one
+  // file pinpoint whether the fault hit during teardown. Raw fds on purpose:
+  // this runs in the libnx exception handler (no mutex/fopen here).
+  const int vfd = open(DATA_ROOT "/nethersx2-vulkan.log",
+                       O_WRONLY | O_CREAT | O_APPEND, 0666);
+  if (vfd >= 0) {
+    if (length > 0)
+      (void)write(vfd, report, (size_t)length < sizeof(report) ?
+                               (size_t)length : sizeof(report));
+    fsync(vfd);
+    close(vfd);
+  }
 }
 #endif
 

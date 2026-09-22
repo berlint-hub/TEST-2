@@ -37,6 +37,15 @@
 #include "hooks/vk.h"
 #endif
 
+// Shutdown tracer: lands in nethersx2-vulkan.log on diagnostic builds. Every
+// teardown step logs, so an OSD-exit crash (no Atmosphere fatal report, just
+// the app error dialog) leaves the exact dying step behind in the log.
+#if defined(USE_VULKAN) && defined(NETHERSX2_VK_DIAGNOSTIC)
+#define SHUT_NOTE(...) vk_diag_note(__VA_ARGS__)
+#else
+#define SHUT_NOTE(...) ((void)0)
+#endif
+
 // Android MotionEvent axis codes (handleControllerAxisEvent expects these)
 #define AAXIS_X         0
 #define AAXIS_Y         1
@@ -2087,33 +2096,50 @@ int main(void) {
   { extern volatile int g_allow_stop; g_allow_stop = 1; }
   // Explicit Exit skips the slow resume-state save; system close still keeps it.
   const jbool save_resume_state = g_quick_menu_exit_requested ? 0 : 1;
+  SHUT_NOTE("shutdown begin exit_requested=%d save_state=%d",
+            g_quick_menu_exit_requested, (int)save_resume_state);
+  SHUT_NOTE("shutdown step stopVMThreadLoop begin");
   nl.stopVMThreadLoop(fake_env, NATIVE_CLASS, save_resume_state);
+  SHUT_NOTE("shutdown step stopVMThreadLoop end");
   pthread_join(emu_thread, NULL);
+  SHUT_NOTE("shutdown step emu_thread joined");
   nl.waitForSaveStateFlush(fake_env, NATIVE_CLASS);
+  SHUT_NOTE("shutdown step savestate flushed");
   // Mirror Android's achievements shutdown before JNI services disappear.
   core_shutdown_achievements();
+  SHUT_NOTE("shutdown step achievements done");
   if (nl.JNI_OnUnload)
     nl.JNI_OnUnload(fake_vm, NULL);
+  SHUT_NOTE("shutdown step JNI_OnUnload done");
   ra_http_shutdown();
+  SHUT_NOTE("shutdown step ra_http done");
   // Stop the GS thread before the remaining global destructors run. The core
   // registers this same destructor through __cxa_atexit; our registration shim
   // replaces it with a one-shot wrapper so finalization cannot destroy MTGS a
   // second time.
   core_shutdown_mtgs();
+  SHUT_NOTE("shutdown step mtgs done");
   // This runs the core's registered C++ destructors (including MTGS) exactly
   // once and in their compiler-defined reverse construction order. The MTGS
   // slot is now a no-op because it was shut down above.
   libc_finalize_core();
+  SHUT_NOTE("shutdown step core finalized");
   pthr_shutdown();
+  SHUT_NOTE("shutdown step pthreads done");
   egl_gl_shutdown();
+  SHUT_NOTE("shutdown step egl done");
   libc_memory_shutdown();
+  SHUT_NOTE("shutdown step memory done");
   so_unload(&emu_mod);
+  SHUT_NOTE("shutdown step so unloaded");
   prefs_save();
   const bool storage_socket = switchStorageSocketReady();
   switchStorageShutdown();
+  SHUT_NOTE("shutdown step storage done socket=%d", (int)storage_socket);
   if (g_net_ready && !storage_socket)
     socketExit();
   g_net_ready = 0;
+  SHUT_NOTE("shutdown complete, exiting");
   extern void NX_NORETURN __libnx_exit(int rc);
   __libnx_exit(0);
   return 0;
