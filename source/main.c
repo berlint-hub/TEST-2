@@ -1891,8 +1891,11 @@ int main(void) {
 
   // Keep Mesa's disk cache next to our data, not in sdmc:/switch.
   // (Neither XDG nor HOME is set on Horizon; Mesa falls back to the CWD.)
+  // MESA_SHADER_CACHE_DIR is the direct override (XDG/HOME alone don't move
+  // it on this Mesa build -- cache kept landing in sdmc:/switch).
   setenv("XDG_CACHE_HOME", DATA_ROOT, 1);
   setenv("HOME", DATA_ROOT, 1);
+  setenv("MESA_SHADER_CACHE_DIR", DATA_ROOT "/mesa_shader_cache", 1);
 
   // settings store: load nethersx2.ini + seed OpenGL/folder defaults
   prefs_init(PREFS_PATH);
@@ -2089,8 +2092,22 @@ int main(void) {
 
   const int has_next_load = envHasNextLoad();
   const char *launcher_path = prefs_get_string("Wrapper/LauncherPath", "");
-  if (g_quick_menu_exit_requested && has_next_load && launcher_path[0])
-    envSetNextLoad(launcher_path, launcher_path);
+  // Chainload back to the launcher menu. Verify the target first: a stale
+  // LauncherPath (moved/renamed NRO) makes hbloader fail the next-load and
+  // Horizon shows the app error dialog even though our teardown is clean.
+  SHUT_NOTE("shutdown chainload has_next_load=%d launcher='%s'",
+            has_next_load, launcher_path);
+  if (g_quick_menu_exit_requested && has_next_load && launcher_path[0]) {
+    struct stat next_st;
+    if (stat(launcher_path, &next_st) == 0) {
+      envSetNextLoad(launcher_path, launcher_path);
+      SHUT_NOTE("shutdown chainload target exists, next-load set");
+    } else {
+      SHUT_NOTE("shutdown chainload target MISSING, clean exit");
+    }
+  } else {
+    SHUT_NOTE("shutdown chainload skipped (no exit request/next-load/path)");
+  }
 
   // The boot-time stop filter must be disabled during shutdown.
   { extern volatile int g_allow_stop; g_allow_stop = 1; }
