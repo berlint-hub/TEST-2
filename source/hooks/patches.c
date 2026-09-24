@@ -11,6 +11,7 @@
 #include "../util.h"
 #include "../hooks.h"
 #include "../so_util.h"
+#include "../prefs.h"
 
 extern so_module emu_mod; // libemucore.so (defined in main.c)
 
@@ -58,6 +59,13 @@ static const Patch g_patches_3668[] = {
   { 0x62a204, 0x54000141, INSN_NOP, "center display X" },
   { 0x62a244, 0x54000221, INSN_NOP, "center display Y" },
   { 0x4ab4a8, 0x1e2c1002, 0x1e2a1002, "GS upscale minimum 0.25x" },
+  // EXPERIMENTAL (GT3): skip the two BLs in XGKICK (FUN_003cf9b0) without an
+  // inline replacement. Addresses + expects verified byte-exact against
+  // v2.2n-3668 (0x3CFA98: BL->0x3CFAE0, 0x3CFAD8: BL->0x3D0234). Hypothesis:
+  // redundant GIF/DMA work per kick. If rendering breaks, DELETE these two
+  // lines -- the calls are essential until proven otherwise.
+  { 0x3CFA98, 0x14000012, INSN_NOP,        "EXPERIMENTAL xgKick skip BL#1" },
+  { 0x3CFAD8, 0x140001D7, INSN_NOP,        "EXPERIMENTAL xgKick skip BL#2" },
 };
 
 // Ignore the core's boot-time RequestStop until application shutdown.
@@ -247,6 +255,11 @@ void patch_game(void) {
 
   for (int i = 0; i < total; i++) {
     const Patch *pt = &tbl[i];
+    // A/B gate for the EXPERIMENTAL XGKICK skip (GT3): off via
+    // EmuCore/Patches/XGKickSkip=false in ini + restart, no rebuild needed.
+    if ((pt->vaddr == 0x3CFA98 || pt->vaddr == 0x3CFAD8) &&
+        !prefs_get_bool("EmuCore/Patches/XGKickSkip", true))
+      continue;
     if (!in_range(pt->vaddr, 4)) {
 
       continue;
