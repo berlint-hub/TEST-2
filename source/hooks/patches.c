@@ -39,6 +39,13 @@ static const Patch g_patches_4248[] = {
   { 0x61c964, 0x54000221, INSN_NOP, "center display Y" },
   // Android exposes 0.25x, but this core revision clamps the GS multiplier to 0.5x.
   { 0x4bab84, 0x1e2c1002, 0x1e2a1002, "GS upscale minimum 0.25x" },
+  // EXPERIMENTAL (GT3): skip the two BLs in XGKICK (FUN_003cf9b0) without an
+  // inline replacement. Addresses + expects verified byte-exact against
+  // v2.2n-4248 (0x3CFA98: BL->0x3CFAE0, 0x3CFAD8: BL->0x3D0234). Hypothesis:
+  // redundant GIF/DMA work per kick. If rendering breaks, DELETE these two
+  // lines -- the calls are essential until proven otherwise.
+  { 0x3CFA98, 0x14000012, INSN_NOP,        "EXPERIMENTAL xgKick skip BL#1" },
+  { 0x3CFAD8, 0x140001D7, INSN_NOP,        "EXPERIMENTAL xgKick skip BL#2" },
 };
 
 static const Patch g_patches_3668[] = {
