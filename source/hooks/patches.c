@@ -11,6 +11,7 @@
 #include "../util.h"
 #include "../hooks.h"
 #include "../so_util.h"
+#include "../prefs.h"
 
 extern so_module emu_mod; // libemucore.so (defined in main.c)
 
@@ -254,6 +255,11 @@ void patch_game(void) {
 
   for (int i = 0; i < total; i++) {
     const Patch *pt = &tbl[i];
+    // A/B gate for the EXPERIMENTAL XGKICK skip (GT3): off via
+    // EmuCore/Patches/XGKickSkip=false in ini + restart, no rebuild needed.
+    if ((pt->vaddr == 0x3CFA98 || pt->vaddr == 0x3CFAD8) &&
+        !prefs_get_bool("EmuCore/Patches/XGKickSkip", true))
+      continue;
     if (!in_range(pt->vaddr, 4)) {
 
       continue;
