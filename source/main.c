@@ -808,6 +808,7 @@ typedef enum {
   QUICK_FRAMERATE_PAL,
   QUICK_FRAMERATE_EE_CYCLE_RATE,
   QUICK_FRAMERATE_EE_CYCLE_SKIP,
+  QUICK_FRAMERATE_VU_CYCLE_STEAL,
   QUICK_FRAMERATE_BACK,
   QUICK_FRAMERATE_COUNT
 } QuickMenuFrameRateItem;
@@ -830,6 +831,7 @@ static float g_quick_menu_ntsc_rate;
 static float g_quick_menu_pal_rate;
 static int g_quick_menu_ee_cycle_rate;
 static int g_quick_menu_ee_cycle_skip;
+static int g_quick_menu_vu_cycle_steal;
 static int g_quick_menu_restore_messages;
 static int g_quick_menu_ready;
 #ifdef USE_VULKAN
@@ -842,6 +844,10 @@ static const char *const g_ee_cycle_rate_labels[] = {
 
 static const char *const g_ee_cycle_skip_labels[] = {
   "Off", "Mild", "Moderate", "Maximum"
+};
+
+static const char *const g_vu_cycle_steal_labels[] = {
+  "Off", "1", "2"
 };
 
 static NxCheatList g_quick_cheats;
@@ -967,7 +973,7 @@ static void quick_menu_draw_main(void) {
 static void quick_menu_draw_framerate(void) {
   static const char *labels[] = {
     "Frame limiter", "NTSC frame rate", "PAL frame rate",
-    "EE cycle rate", "EE cycle skip", "Back"
+    "EE cycle rate", "EE cycle skip", "VU cycle steal", "Back"
   };
   char text[1024] = "FRAME RATE CONTROL\n\n";
   for (int i = 0; i < QUICK_FRAMERATE_COUNT; i++) {
@@ -987,6 +993,9 @@ static void quick_menu_draw_framerate(void) {
     else if (i == QUICK_FRAMERATE_EE_CYCLE_SKIP)
       text_append(text, sizeof(text), "%s%s: %s\n", marker, labels[i],
                   g_ee_cycle_skip_labels[g_quick_menu_ee_cycle_skip]);
+    else if (i == QUICK_FRAMERATE_VU_CYCLE_STEAL)
+      text_append(text, sizeof(text), "%s%s: %s\n", marker, labels[i],
+                  g_vu_cycle_steal_labels[g_quick_menu_vu_cycle_steal]);
     else
       text_append(text, sizeof(text), "%s%s\n", marker, labels[i]);
   }
@@ -1296,6 +1305,9 @@ static void quick_menu_open(void) {
   g_quick_menu_ee_cycle_skip = prefs_get_int("EmuCore/Speedhacks/EECycleSkip", 0);
   if (g_quick_menu_ee_cycle_skip < 0) g_quick_menu_ee_cycle_skip = 0;
   if (g_quick_menu_ee_cycle_skip > 3) g_quick_menu_ee_cycle_skip = 3;
+  g_quick_menu_vu_cycle_steal = prefs_get_int("EmuCore/Speedhacks/vuCycleSteal", 0);
+  if (g_quick_menu_vu_cycle_steal < 0) g_quick_menu_vu_cycle_steal = 0;
+  if (g_quick_menu_vu_cycle_steal > 2) g_quick_menu_vu_cycle_steal = 2;
 #ifdef USE_VULKAN
   g_quick_menu_lsfg_enabled = vk_lsfg_is_enabled();
 #endif
@@ -1644,6 +1656,13 @@ static bool quick_menu_update(u64 down, u64 pressed) {
       if (g_quick_menu_ee_cycle_skip < 0) g_quick_menu_ee_cycle_skip = 0;
       if (g_quick_menu_ee_cycle_skip > 3) g_quick_menu_ee_cycle_skip = 3;
       prefs_set_int("EmuCore/Speedhacks/EECycleSkip", g_quick_menu_ee_cycle_skip);
+      apply_settings = true;
+    } else if (direction &&
+               g_quick_menu_framerate_selection == QUICK_FRAMERATE_VU_CYCLE_STEAL) {
+      g_quick_menu_vu_cycle_steal += direction;
+      if (g_quick_menu_vu_cycle_steal < 0) g_quick_menu_vu_cycle_steal = 0;
+      if (g_quick_menu_vu_cycle_steal > 2) g_quick_menu_vu_cycle_steal = 2;
+      prefs_set_int("EmuCore/Speedhacks/vuCycleSteal", g_quick_menu_vu_cycle_steal);
       apply_settings = true;
     }
     if (apply_settings) nl.applySettings(fake_env, NATIVE_CLASS);
