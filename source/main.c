@@ -2053,12 +2053,22 @@ int main(void) {
   pthr_pin_bg_core();
   pthr_set_priority(45);  // below audio
 
+  // Frame timing log
+  FILE *ft_log = fopen("/switch/nethersx2/frame_timing.log", "w");
+  if (ft_log) {
+    fprintf(ft_log, "timestamp_ns,frame_count,frame_time_us,boost_state\n");
+    fflush(ft_log);
+  }
+  u64 last_ft_ts = 0;
+  int last_frame_count = 0;
+
   int applet_running = 1;
   while (applet_running && !g_quick_menu_exit_requested) {
     if (crash_in_progress())
       for (;;) svcSleepThread(1000000000ULL);
 
     if ((input_polls % housekeeping_divisor) == 0) {
+      u64 now = armGetSystemTick();
       applet_running = appletMainLoop();
       if (!applet_running) break;
       quick_menu_persist_game_crc();
@@ -2076,6 +2086,18 @@ int main(void) {
         quick_menu_status("Quick menu: L + R + Plus");
         quick_menu_hint_shown = 1;
       }
+
+      // Frame timing log (sampled at 125 Hz)
+      if (ft_log && frame_count != last_frame_count && last_frame_count > 0) {
+        u64 dt_ns = now - last_ft_ts;
+        double dt_us = (double)dt_ns / 1000.0;
+        fprintf(ft_log, "%llu,%d,%.2f,%d\n", now, frame_count, dt_us, boosting);
+        fflush(ft_log);
+      }
+      if (frame_count != last_frame_count) {
+        last_frame_count = frame_count;
+        last_ft_ts = now;
+      }
     }
 
     update_gamepads();
@@ -2089,6 +2111,11 @@ int main(void) {
   if (g_quick_menu_mode != QUICK_MENU_CLOSED)
     quick_menu_close();
   turbo_set_active(0);
+
+  if (ft_log) {
+    fclose(ft_log);
+    ft_log = NULL;
+  }
 
   const int has_next_load = envHasNextLoad();
   const char *launcher_path = prefs_get_string("Wrapper/LauncherPath", "");
