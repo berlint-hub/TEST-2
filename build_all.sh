@@ -16,9 +16,31 @@ CORES_DIR="${CORES_DIR:-$ROOT}"
 # nxvk installed as a devkitPro portlib.
 NXVK_SDK_ROOT="${NXVK_SDK_ROOT:-$APP/nxvk-sdk}"
 
+# Use local patched core from repo root (uploaded as libemucore_PATCHED_4248.so)
+LOCAL_CORE="$APP/libemucore_PATCHED_4248.so"
+LOCAL_ASSETS="$APP/NetherSX2-v2.2n-4248/assets"
+if [[ ! -f "$LOCAL_CORE" ]]; then
+  echo "Missing local core: $LOCAL_CORE" >&2
+  exit 1
+fi
+# GameIndex.yaml is required - try local, then fall back to extracting from tarball if provided
+if [[ -d "$LOCAL_ASSETS" && -f "$LOCAL_ASSETS/GameIndex.yaml" ]]; then
+  echo "Using local assets: $LOCAL_ASSETS"
+else
+  # Fallback: require tarball with assets
+  if [[ -z "${CORES_TARBALL_URL:-}" ]]; then
+    echo "No local assets and no CORES_TARBALL_URL provided" >&2
+    exit 1
+  fi
+  mkdir -p "$APP/cores-in"
+  curl -fL --retry 3 -o /tmp/cores.tgz "$CORES_TARBALL_URL"
+  tar -xzf /tmp/cores.tgz -C "$APP/cores-in"
+  LOCAL_ASSETS="$APP/cores-in/NetherSX2-v2.2n-4248/assets"
+fi
+
 required=(
-  "$CORES_DIR/NetherSX2-v2.2n-4248/lib/arm64-v8a/libemucore.so"
-  "$CORES_DIR/NetherSX2-v2.2n-4248/assets/GameIndex.yaml"
+  "$LOCAL_CORE"
+  "$LOCAL_ASSETS/GameIndex.yaml"
 )
 if [[ -n "$NXVK_SDK_ROOT" ]]; then
   required+=(
@@ -69,13 +91,13 @@ cp -f "$EMU_NRO" NetherSX2_nx_vk.nro
 
 echo "==== bundle single core + emulator binary into the launcher romfs ===="
 mkdir -p "$APP/launcher/romfs/cores" "$APP/launcher/romfs/emu"
-cp -f "$CORES_DIR/NetherSX2-v2.2n-4248/lib/arm64-v8a/libemucore.so" "$APP/launcher/romfs/cores/emucore_4248.so"
+cp -f "$LOCAL_CORE" "$APP/launcher/romfs/cores/emucore_4248.so"
 cp -f "$APP/NetherSX2_nx_vk.nro" "$APP/launcher/romfs/emu/NetherSX2_nx_vk.nro"
 
 echo "==== bundle resources into the launcher romfs ===="
 rd="$APP/launcher/romfs/res/4248"
 rm -rf "$rd"; mkdir -p "$rd"
-cp -rf "$CORES_DIR/NetherSX2-v2.2n-4248/assets/." "$rd/"
+cp -rf "$LOCAL_ASSETS/." "$rd/"
 rm -rf "$rd/dexopt"
 
 echo "==== forwarder stub (built in-tree from launcher/fwd/) ===="
