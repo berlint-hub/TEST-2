@@ -201,15 +201,29 @@ unsigned pthr_worker_mask(void) {
   return m;
 }
 
-// heavy emucore threads (MTGS, VU1, ring/texture workers): distinct preferred
-// core round-robined over the work pool; work_mask lets a light worker migrate
-// off a heavy peer's core but never onto the EE core.
+// heavy emucore threads (MTGS, VU1, ring/texture workers): the first
+// work_count of them each get a PRIVATE core with an exclusive mask -- they
+// can never share a core with each other nor migrate between cores. Private
+// L1/L2, warm cache, and no equal-priority FIFO starvation (Horizon never
+// preempts between equal priorities on one core). Later (light) workers fall
+// back to the round-robin pool with work_mask.
+static unsigned work_excl = 0; // workers handed an exclusive core so far
+
 static void assign_work_core(void) {
   mutexLock(&core_lock);
   core_init_once();
-  const int core = work_list[work_rr++ % (unsigned)work_count]; const unsigned m = work_mask;
+  int core; unsigned m;
+  if (work_count >= 2 && work_excl < (unsigned)work_count) {
+    core = work_list[work_excl++];
+    m = 1u << core;
+  } else {
+    core = work_list[work_rr++ % (unsigned)work_count]; m = work_mask;
+  }
   mutexUnlock(&core_lock);
   svcSetThreadCoreMask(CUR_THREAD_HANDLE, core, m);
+  // pthr_set_priority() is defined below; this is the same call. Above the
+  // input pump, below audio. Failure is harmless.
+  svcSetThreadPriority(CUR_THREAD_HANDLE, (u32)EMU_THREAD_PRIO);
 }
 
 // background threads (audio, etc.): the dedicated bg core if we have one, else

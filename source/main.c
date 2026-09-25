@@ -304,6 +304,8 @@ static void *emu_thread_main(void *arg) {
   (void)arg;
   pthr_ensure_fake_tls();
   pthr_pin_ee_core();
+  // Hottest thread on its own private core: same priority as the workers.
+  pthr_set_priority(EMU_THREAD_PRIO);
   g_vm_running = 1;
   nl.runVMThread(fake_env, NATIVE_CLASS, FAKE_CONTEXT,
                  g_bios_boot ? NULL : jni_make_string(g_disc_path), NULL);
@@ -2056,7 +2058,7 @@ int main(void) {
   // Frame timing log
   FILE *ft_log = fopen("/switch/nethersx2/frame_timing.log", "w");
   if (ft_log) {
-    fprintf(ft_log, "timestamp_ns,frame_count,frame_time_us,boost_state\n");
+    fprintf(ft_log, "timestamp_ticks,frame_count,frame_time_us,boost_state\n");
     fflush(ft_log);
   }
   u64 last_ft_ts = 0;
@@ -2087,10 +2089,11 @@ int main(void) {
         quick_menu_hint_shown = 1;
       }
 
-      // Frame timing log (sampled at 125 Hz)
+      // Frame timing log (sampled at 125 Hz). armGetSystemTick() returns
+      // generic-timer ticks, not ns: convert with the tick frequency.
       if (ft_log && frame_count != last_frame_count && last_frame_count > 0) {
-        u64 dt_ns = now - last_ft_ts;
-        double dt_us = (double)dt_ns / 1000.0;
+        u64 dt_ticks = now - last_ft_ts;
+        double dt_us = (double)dt_ticks * 1000000.0 / (double)armGetSystemTickFreq();
         fprintf(ft_log, "%llu,%d,%.2f,%d\n", now, frame_count, dt_us, boosting);
         fflush(ft_log);
       }

@@ -67,6 +67,12 @@ void pthr_set_priority(int priority);
 
 void pthr_pin_ee_core(void);
 
+// Priority shared by the EE thread and all trampoline worker threads
+// (MTGS/VU1/...): above the input pump (45), below the audio driver, so
+// emulation wins the CPU against housekeeping but never starves audio
+// (audio glitches read as stutter).
+#define EMU_THREAD_PRIO 30
+
 // Worker pool mask (hot cores minus the EE core) for affinity translation:
 // the core's own sched_setaffinity wishes are honored only inside this mask
 // so a translated request can never steal the EE core.
