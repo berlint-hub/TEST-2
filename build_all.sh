@@ -23,17 +23,15 @@ if [[ ! -f "$LOCAL_CORE" ]]; then
   echo "Missing local core: $LOCAL_CORE" >&2
   exit 1
 fi
-# GameIndex.yaml is required - try local, then fall back to extracting from tarball if provided
+# GameIndex.yaml is required - try local, then fall back to Catbox tarball
 if [[ -d "$LOCAL_ASSETS" && -f "$LOCAL_ASSETS/GameIndex.yaml" ]]; then
   echo "Using local assets: $LOCAL_ASSETS"
 else
-  # Fallback: require tarball with assets
-  if [[ -z "${CORES_TARBALL_URL:-}" ]]; then
-    echo "No local assets and no CORES_TARBALL_URL provided" >&2
-    exit 1
-  fi
+  # Fallback: download assets from Catbox (same as workflow)
+  FALLBACK_URL="https://files.catbox.moe/5g9cis.tgz"
+  echo "Local assets not found, downloading from $FALLBACK_URL"
   mkdir -p "$APP/cores-in"
-  curl -fL --retry 3 -o /tmp/cores.tgz "$CORES_TARBALL_URL"
+  curl -fL --retry 3 -o /tmp/cores.tgz "$FALLBACK_URL"
   tar -xzf /tmp/cores.tgz -C "$APP/cores-in"
   LOCAL_ASSETS="$APP/cores-in/NetherSX2-v2.2n-4248/assets"
 fi
