@@ -11,6 +11,7 @@
 #include "../util.h"
 #include "../hooks.h"
 #include "../so_util.h"
+#include "../prefs.h"
 
 extern so_module emu_mod; // libemucore.so (defined in main.c)
 
@@ -244,6 +245,40 @@ static void detect_core_version(void) {
     g_core_version = CORE_VER_V22N_3668;
 }
 
+// VU Cycle Steal (GT3 distance views), 4248-only. Single-word repurpose of
+// the EECycleSkip multiply in VU_Thread::ExecuteVU:
+//   0x4A3320: 0x1B0A7D08 = MUL w8, w8, w10
+//     w8 = min(avg VU1 cycles, 3000) [MOVZ#3000 0x4A3310 + CMP#3000 0x4A3318
+//     + CSEL/LO 0x4A331C], w10 = EECycleSkip byte (LDRB [x21,#5] 0x4A3304).
+//     Preceded by inlined Get_vuCycles (4x LDAR 0x4A32D4-0x4A32E4 + ADD chain
+//     + shift#2 0x4A32FC).
+// Level 1 (0x53017D08 = LSR w8, w8, #1): counters gain cycles>>1.
+// Level 2 (0x2A0803E8 = MOV w8, w8): counters gain full cycles.
+// The two downstream ADD/STR pairs (cpuRegs.cycle, VU0.cycle at 0x4A3324-2C
+// and 0x4A3334-3C) then add the stolen amount; w8 is dead afterwards
+// (rewritten by LDRB at 0x4A3348), so the replace is safe. Replaces
+// EECycleSkip while active: keep EE cycle skip Off. MTVU path only.
+// Applies at core load: changing the menu needs a game restart.
+#define VU_STEAL_4248_ADDR   0x4A3320u
+#define VU_STEAL_4248_EXPECT 0x1B0A7D08u
+#define VU_STEAL_4248_LVL1   0x53017D08u
+#define VU_STEAL_4248_LVL2   0x2A0803E8u
+
+static void patch_vu_steal_4248(void) {
+  if (g_core_version != CORE_VER_V22N_4248)
+    return;
+  int level = prefs_get_int("EmuCore/Speedhacks/vuCycleSteal", 0);
+  if (level < 1 || level > 2)
+    return;
+  if (!in_range(VU_STEAL_4248_ADDR, 4))
+    return;
+  volatile uint32_t *p =
+      (volatile uint32_t *)((uintptr_t)emu_mod.load_base + VU_STEAL_4248_ADDR);
+  if (*p != VU_STEAL_4248_EXPECT)
+    return;
+  *p = (level == 1) ? VU_STEAL_4248_LVL1 : VU_STEAL_4248_LVL2;
+}
+
 void patch_game(void) {
   detect_core_version();
 
@@ -261,6 +296,11 @@ void patch_game(void) {
 
   for (int i = 0; i < total; i++) {
     const Patch *pt = &tbl[i];
+    // A/B gate for the EXPERIMENTAL XGKICK skip (GT3): off via
+    // EmuCore/Patches/XGKickSkip=false in ini + restart, no rebuild needed.
+    if ((pt->vaddr == 0x3CFA98 || pt->vaddr == 0x3CFAD8) &&
+        !prefs_get_bool("EmuCore/Patches/XGKickSkip", true))
+      continue;
     if (!in_range(pt->vaddr, 4)) {
 
       continue;
@@ -272,6 +312,8 @@ void patch_game(void) {
     }
     *p = pt->insn;
   }
+
+  patch_vu_steal_4248();
 
   patch_quick_menu_center();
 
