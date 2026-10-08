@@ -1,0 +1,64 @@
+name: ReShade lowest-depth build
+
+on:
+  push:
+    branches: [reshade-lowest-depth]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reshade-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-reshade:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - name: Checkout TEST-2 (patch script)
+        uses: actions/checkout@v4
+        with:
+          ref: reshade-lowest-depth
+          path: test2
+
+      - name: Checkout ReShade upstream
+        uses: actions/checkout@v4
+        with:
+          repository: crosire/reshade
+          ref: main
+          submodules: recursive
+          path: reshade
+
+      - name: Setup Python (for glad)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Apply lowest heuristic patch
+        run: python test2/reshade-patch/apply_lowest_heuristic.py reshade
+
+      - name: Show patched hunk
+        run: git -C reshade diff --stat; git -C reshade diff -- examples/09-depth/generic_depth_addon.cpp | head -n 100
+        shell: bash
+
+      - name: Configure CMake (x64)
+        run: cmake -S reshade -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Release x64
+        run: cmake --build build --config Release --parallel
+
+      - name: List outputs
+        run: Get-ChildItem -Recurse build | Where-Object { $_.Extension -in '.dll','.addon' } | Select-Object FullName, Length
+        shell: pwsh
+
+      - name: Upload ReShade DLLs
+        uses: actions/upload-artifact@v4
+        with:
+          name: ReShade-lowest-depth-${{ github.sha }}
+          path: |
+            build/**/ReShade64.dll
+            build/**/*.addon
+          if-no-files-found: error
+          retention-days: 14
