@@ -1,4 +1,4 @@
-"""Applies LOWEST vertices/drawcalls heuristic to Generic Depth addon.
+"""Applies LOWEST vertices/drawcalls + reversed filter to Generic Depth addon.
 Run from repo root: python apply_lowest_heuristic.py [reshade-dir]
 Idempotent - safe to run twice.
 """
@@ -70,7 +70,7 @@ replace_once(
 \t\t\t\t\tdo_copy = current_stats.vertices >= state.best_copy_stats.vertices || (op == clear_op::fullscreen_draw && current_stats.drawcalls >= state.best_copy_stats.drawcalls);
 \t\t\t\t}""")
 
-# 4) ImGui combo items
+# 4) ImGui combo items for draw stats heuristic
 replace_once(
 """\tconst char *const draw_stats_heuristic_items[] = {
 \t\t"Default",
@@ -85,7 +85,78 @@ replace_once(
 \t\t"Lowest draw calls"
 \t};""")
 
-# 5) clamp loaded config (robustness, optional - only if pattern exists)
+# 5) Add reversed filtering config variable after FilterFormat
+replace_once(
+"""\t// Enable or disable the format check from 'check_depth_format' in the detection heuristic
+\tstatic unsigned int s_format_filtering = 0;
+\tstatic unsigned int s_custom_resolution_filtering[2] = {};""",
+"""\t// Enable or disable the format check from 'check_depth_format' in the detection heuristic
+\tstatic unsigned int s_format_filtering = 0;
+\tstatic unsigned int s_custom_resolution_filtering[2] = {};
+\t// Filter by reversed depth buffer detection
+\tstatic unsigned int s_reversed_filtering = 0;""")
+
+# 6) Add reversed filtering logic in on_begin_render_effects selection
+replace_once(
+"""\t\tif (s_aspect_ratio_heuristic != aspect_ratio_heuristic::none && !check_aspect_ratio(static_cast<float>(info.desc.texture.width), static_cast<float>(info.desc.texture.height), static_cast<float>(frame_width), static_cast<float>(frame_height)))
+\t\t\tcontinue; // Not a good fit
+
+\t\tif (selected_depth_stencil.handle == 0 ||""",
+"""\t\tif (s_aspect_ratio_heuristic != aspect_ratio_heuristic::none && !check_aspect_ratio(static_cast<float>(info.desc.texture.width), static_cast<float>(info.desc.texture.height), static_cast<float>(frame_width), static_cast<float>(frame_height)))
+\t\t\tcontinue; // Not a good fit
+
+\t\t// Filter by reversed depth buffer detection
+\t\tconst bool is_reversed = info.last_frame_stats.reversed_clear_value;
+\t\tif (s_reversed_filtering == 1 && !is_reversed)
+\t\t\tcontinue; // Only allow reversed
+\t\tif (s_reversed_filtering == 2 && is_reversed)
+\t\t\tcontinue; // Exclude reversed
+
+\t\tif (selected_depth_stencil.handle == 0 ||""")
+
+# 7) Add config loading for FilterReversed
+replace_once(
+"""\treshade::get_config_value(nullptr, "DEPTH", "FilterFormat", s_format_filtering);
+\treshade::get_config_value(nullptr, "DEPTH", "FilterResolutionWidth", s_custom_resolution_filtering[0]);
+\treshade::get_config_value(nullptr, "DEPTH", "FilterResolutionHeight", s_custom_resolution_filtering[1]);
+
+\tif (s_aspect_ratio_heuristic > aspect_ratio_heuristic::match_custom_resolution_exactly)""",
+"""\treshade::get_config_value(nullptr, "DEPTH", "FilterFormat", s_format_filtering);
+\treshade::get_config_value(nullptr, "DEPTH", "FilterReversed", s_reversed_filtering);
+\treshade::get_config_value(nullptr, "DEPTH", "FilterResolutionWidth", s_custom_resolution_filtering[0]);
+\treshade::get_config_value(nullptr, "DEPTH", "FilterResolutionHeight", s_custom_resolution_filtering[1]);
+
+\tif (s_aspect_ratio_heuristic > aspect_ratio_heuristic::match_custom_resolution_exactly)""")
+
+# 8) Add ImGui combo for reversed filtering
+replace_once(
+"""\tif (ImGui::Combo("Filter by depth buffer format", reinterpret_cast<int *>(&s_format_filtering), depth_format_items, static_cast<int>(std::size(depth_format_items))))
+\t{
+\t\treshade::set_config_value(nullptr, "DEPTH", "FilterFormat", s_format_filtering);
+\t\tforce_reset = true;
+\t}
+
+\tif (bool copy_before_clear_operations = s_preserve_depth_buffers != 0;""",
+"""\tif (ImGui::Combo("Filter by depth buffer format", reinterpret_cast<int *>(&s_format_filtering), depth_format_items, static_cast<int>(std::size(depth_format_items))))
+\t{
+\t\treshade::set_config_value(nullptr, "DEPTH", "FilterFormat", s_format_filtering);
+\t\tforce_reset = true;
+\t}
+
+\tconst char *const reversed_items[] = {
+\t\t"Any",
+\t\t"Prefer reversed",
+\t\t"Exclude reversed"
+\t};
+\tif (ImGui::Combo("Filter by reversed depth", reinterpret_cast<int *>(&s_reversed_filtering), reversed_items, static_cast<int>(std::size(reversed_items))))
+\t{
+\t\treshade::set_config_value(nullptr, "DEPTH", "FilterReversed", s_reversed_filtering);
+\t\tforce_reset = true;
+\t}
+
+\tif (bool copy_before_clear_operations = s_preserve_depth_buffers != 0;""")
+
+# 9) clamp loaded config for draw stats heuristic (robustness)
 old_clamp = '\treshade::get_config_value(nullptr, "DEPTH", "DrawStatsHeuristic", reinterpret_cast<unsigned int &>(s_draw_stats_heuristic));'
 new_clamp = old_clamp + '\n\tif (s_draw_stats_heuristic > draw_stats_heuristic::lowest_drawcalls)\n\t\ts_draw_stats_heuristic = draw_stats_heuristic::prefer_vertices;'
 if old_clamp in text and new_clamp not in text:
