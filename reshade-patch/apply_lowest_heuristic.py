@@ -6,10 +6,8 @@ Works against UPSTREAM crosire/reshade@main (original, unmodified).
 import sys
 from pathlib import Path
 
-
 target = Path(sys.argv[1] if len(sys.argv) > 1 else ".") / "examples" / "09-depth" / "generic_depth_addon.cpp"
 text = target.read_text(encoding="utf-8")
-
 
 def replace_once(old: str, new: str):
     global text
@@ -18,16 +16,13 @@ def replace_once(old: str, new: str):
         raise AssertionError(f"expected 1 occurrence, found {count} for: {old[:80]!r}")
     text = text.replace(old, new)
 
-
 def replace_once_any(candidates: list[str], new: str):
     global text
     for old in candidates:
         if old in text:
             text = text.replace(old, new, 1)
             return
-    # Fallback so the error still points to the exact intended snippet.
     raise AssertionError(f"expected one of {candidates[0][:80]!r} ... to appear exactly once")
-
 
 # 1) enum - add lowest variants (keep 0,1,2 stable for existing presets)
 replace_once(
@@ -106,34 +101,32 @@ replace_once(
 \t};""")
 
 # 5) Add reversed filtering config variable after FilterFormat
-# Upstream wording has changed a bit over time: accept both "detection" and "detection heuristic".
-replace_once_any(
-    [
-        """// Enable or disable the format check from 'check_depth_format' in the detection heuristic
-\tstatic unsigned int s_format_filtering = 0;
-\tstatic unsigned int s_custom_resolution_filtering[2] = {};""",
-        """// Enable or disable the format check from 'check_depth_format' in the detection
-\tstatic unsigned int s_format_filtering = 0;
-\tstatic unsigned int s_custom_resolution_filtering[2] = {};""",
-    ],
+# Tolerant match for comment - upstream may have "heuristic" or just "detection"
+replace_once_any([
     """// Enable or disable the format check from 'check_depth_format' in the detection heuristic
+\tstatic unsigned int s_format_filtering = 0;
+\tstatic unsigned int s_custom_resolution_filtering[2] = {};""",
+    """// Enable or disable the format check from 'check_depth_format' in the detection
+\tstatic unsigned int s_format_filtering = 0;
+\tstatic unsigned int s_custom_resolution_filtering[2] = {};""",
+], """// Enable or disable the format check from 'check_depth_format' in the detection heuristic
 \tstatic unsigned int s_format_filtering = 0;
 \tstatic unsigned int s_custom_resolution_filtering[2] = {};
 \t// Filter by reversed depth buffer detection
-\tstatic unsigned int s_reversed_filtering = 0;""",
-)
+\tstatic unsigned int s_reversed_filtering = 0;""")
 
 # 6) Add reversed filtering logic in on_begin_render_effects selection
+# EXACT upstream pattern: check_aspect_ratio(..., frame_width, frame_height)
 replace_once(
 """\t\tif (s_format_filtering != 0 && !check_depth_format(info.desc.texture.format))
 \t\t\tcontinue;
-\t\tif (s_aspect_ratio_heuristic != aspect_ratio_heuristic::none && !check_aspect_ratio(static_cast<float>(info.desc.texture.width), static_cast<float>(info.desc.texture.height), static_cast<float>(info.desc.texture.width / info.desc.texture.height)))
+\t\tif (s_aspect_ratio_heuristic != aspect_ratio_heuristic::none && !check_aspect_ratio(static_cast<float>(info.desc.texture.width), static_cast<float>(info.desc.texture.height), static_cast<float>(frame_width), static_cast<float>(frame_height)))
 \t\t\tcontinue; // Not a good fit
 
 \t\tif (selected_depth_stencil.handle == 0 ||""",
 """\t\tif (s_format_filtering != 0 && !check_depth_format(info.desc.texture.format))
 \t\t\tcontinue;
-\t\tif (s_aspect_ratio_heuristic != aspect_ratio_heuristic::none && !check_aspect_ratio(static_cast<float>(info.desc.texture.width), static_cast<float>(info.desc.texture.height), static_cast<float>(info.desc.texture.width / info.desc.texture.height)))
+\t\tif (s_aspect_ratio_heuristic != aspect_ratio_heuristic::none && !check_aspect_ratio(static_cast<float>(info.desc.texture.width), static_cast<float>(info.desc.texture.height), static_cast<float>(frame_width), static_cast<float>(frame_height)))
 \t\t\tcontinue; // Not a good fit
 
 \t\t// Filter by reversed depth buffer detection
