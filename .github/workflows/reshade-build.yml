@@ -29,6 +29,7 @@ jobs:
           repository: crosire/reshade
           ref: main
           submodules: recursive
+          fetch-tags: true
           path: reshade
 
       - name: Setup Python (for glad)
@@ -42,13 +43,17 @@ jobs:
           cmake --version
           python --version
           pip --version
-          where python
-          where pip
           git -C reshade submodule status
           Get-ChildItem reshade/deps | Select-Object Name
 
       - name: Apply lowest heuristic patch
         run: python test2/reshade-patch/apply_lowest_heuristic.py reshade
+
+      - name: Generate res/version.h (gitignored, required by CMake)
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File reshade/tools/update_version.ps1 reshade/res/version.h
+          Get-Content reshade/res/version.h
 
       - name: Show patched hunk
         run: git -C reshade diff --stat; git -C reshade diff -- examples/09-depth/generic_depth_addon.cpp | head -n 100
