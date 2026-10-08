@@ -1,6 +1,7 @@
 """Applies LOWEST vertices/drawcalls + reversed filter to Generic Depth addon.
 Run from repo root: python apply_lowest_heuristic.py [reshade-dir]
 Idempotent - safe to run twice.
+Works against UPSTREAM crosire/reshade@main (original, unmodified).
 """
 import sys
 from pathlib import Path
@@ -10,7 +11,9 @@ text = target.read_text(encoding="utf-8")
 
 def replace_once(old: str, new: str):
     global text
-    assert text.count(old) == 1, f"expected 1 occurrence, found {text.count(old)} for: {old[:80]!r}"
+    count = text.count(old)
+    if count != 1:
+        raise AssertionError(f"expected 1 occurrence, found {count} for: {old[:80]!r}")
     text = text.replace(old, new)
 
 # 1) enum - add lowest variants (keep 0,1,2 stable for existing presets)
@@ -37,7 +40,9 @@ replace_once(
 \t\tif (s_draw_stats_heuristic == draw_stats_heuristic::vertices)
 \t\t\treturn vertices > other.vertices;
 \t\tif (s_draw_stats_heuristic == draw_stats_heuristic::drawcalls)
-\t\t\treturn drawcalls > other.drawcalls;""",
+\t\t\treturn drawcalls > other.drawcalls;
+
+\t\treturn (drawcalls_indirect < (drawcalls / 3) ?""",
 """\tbool operator>(const draw_stats &other) const
 \t{
 \t\tconst bool is_empty = vertices == 0 && drawcalls == 0;
@@ -52,13 +57,15 @@ replace_once(
 \t\tif (s_draw_stats_heuristic == draw_stats_heuristic::lowest_vertices)
 \t\t\treturn vertices < other.vertices;
 \t\tif (s_draw_stats_heuristic == draw_stats_heuristic::lowest_drawcalls)
-\t\t\treturn drawcalls < other.drawcalls;""")
+\t\t\treturn drawcalls < other.drawcalls;
+
+\t\treturn (drawcalls_indirect < (drawcalls / 3) ?""")
 
 # 3) copy decision in on_clear_depth_impl - inverted <= for lowest modes
 replace_once(
-"""\t\t\t// Use greater equals operator here to handle case where the same scene is first rendered into a shadow map and then for real (e.g. Mirror's Edge main menu)
+"""\t\t\t\t// Use greater equals operator here to handle case where the same scene is first rendered into a shadow map and then for real (e.g. Mirror's Edge main menu)
 \t\t\t\tdo_copy = current_stats.vertices >= state.best_copy_stats.vertices || (op == clear_op::fullscreen_draw && current_stats.drawcalls >= state.best_copy_stats.drawcalls);""",
-"""\t\t\tif (s_draw_stats_heuristic == draw_stats_heuristic::lowest_vertices || s_draw_stats_heuristic == draw_stats_heuristic::lowest_drawcalls)
+"""\t\t\t\tif (s_draw_stats_heuristic == draw_stats_heuristic::lowest_vertices || s_draw_stats_heuristic == draw_stats_heuristic::lowest_drawcalls)
 \t\t\t\t{
 \t\t\t\t\tconst bool best_empty = state.best_copy_stats.vertices == 0 && state.best_copy_stats.drawcalls == 0;
 \t\t\t\t\t// Inverted logic for lowest heuristics: keep the smallest workload (e.g. for UI / small depth buffers)
@@ -98,11 +105,15 @@ replace_once(
 
 # 6) Add reversed filtering logic in on_begin_render_effects selection
 replace_once(
-"""\t\tif (s_aspect_ratio_heuristic != aspect_ratio_heuristic::none && !check_aspect_ratio(static_cast<float>(info.desc.texture.width), static_cast<float>(info.desc.texture.height), static_cast<float>(frame_width), static_cast<float>(frame_height)))
+"""\t\tif (s_format_filtering != 0 && !check_depth_format(info.desc.texture.format))
+\t\t\tcontinue;
+\t\tif (s_aspect_ratio_heuristic != aspect_ratio_heuristic::none && !check_aspect_ratio(static_cast<float>(info.desc.texture.width), static_cast<float>(info.desc.texture.height), static_cast<float>(frame_width), static_cast<float>(frame_height)))
 \t\t\tcontinue; // Not a good fit
 
 \t\tif (selected_depth_stencil.handle == 0 ||""",
-"""\t\tif (s_aspect_ratio_heuristic != aspect_ratio_heuristic::none && !check_aspect_ratio(static_cast<float>(info.desc.texture.width), static_cast<float>(info.desc.texture.height), static_cast<float>(frame_width), static_cast<float>(frame_height)))
+"""\t\tif (s_format_filtering != 0 && !check_depth_format(info.desc.texture.format))
+\t\t\tcontinue;
+\t\tif (s_aspect_ratio_heuristic != aspect_ratio_heuristic::none && !check_aspect_ratio(static_cast<float>(info.desc.texture.width), static_cast<float>(info.desc.texture.height), static_cast<float>(frame_width), static_cast<float>(frame_height)))
 \t\t\tcontinue; // Not a good fit
 
 \t\t// Filter by reversed depth buffer detection
@@ -136,7 +147,8 @@ replace_once(
 \t\tforce_reset = true;
 \t}
 
-\tif (bool copy_before_clear_operations = s_preserve_depth_buffers != 0;""",
+\tif (bool copy_before_clear_operations = s_preserve_depth_buffers != 0;
+\t\tImGui::Checkbox("Copy depth buffer before clear operations", &copy_before_clear_operations))""",
 """\tif (ImGui::Combo("Filter by depth buffer format", reinterpret_cast<int *>(&s_format_filtering), depth_format_items, static_cast<int>(std::size(depth_format_items))))
 \t{
 \t\treshade::set_config_value(nullptr, "DEPTH", "FilterFormat", s_format_filtering);
@@ -154,7 +166,8 @@ replace_once(
 \t\tforce_reset = true;
 \t}
 
-\tif (bool copy_before_clear_operations = s_preserve_depth_buffers != 0;""")
+\tif (bool copy_before_clear_operations = s_preserve_depth_buffers != 0;
+\t\tImGui::Checkbox("Copy depth buffer before clear operations", &copy_before_clear_operations))""")
 
 # 9) clamp loaded config for draw stats heuristic (robustness)
 old_clamp = '\treshade::get_config_value(nullptr, "DEPTH", "DrawStatsHeuristic", reinterpret_cast<unsigned int &>(s_draw_stats_heuristic));'
