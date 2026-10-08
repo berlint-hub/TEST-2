@@ -93,7 +93,8 @@ replace_once(
 \t};""")
 
 # 5) Add reversed filtering config variable after FilterFormat
-# NOTE: upstream comment line has NO leading tab, but static vars DO have tabs
+# NOTE: upstream comment has NO leading tab, but static vars DO have tabs
+# EXACT match: "in the detection heuristic" (not "heuristics" or "detection")
 replace_once(
 """// Enable or disable the format check from 'check_depth_format' in the detection heuristic
 \tstatic unsigned int s_format_filtering = 0;
