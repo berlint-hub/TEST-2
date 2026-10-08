@@ -93,11 +93,12 @@ replace_once(
 \t};""")
 
 # 5) Add reversed filtering config variable after FilterFormat
+# NOTE: upstream comment line has NO leading tab, but static vars DO have tabs
 replace_once(
-"""\t// Enable or disable the format check from 'check_depth_format' in the detection heuristic
+"""// Enable or disable the format check from 'check_depth_format' in the detection heuristic
 \tstatic unsigned int s_format_filtering = 0;
 \tstatic unsigned int s_custom_resolution_filtering[2] = {};""",
-"""\t// Enable or disable the format check from 'check_depth_format' in the detection heuristic
+"""// Enable or disable the format check from 'check_depth_format' in the detection heuristic
 \tstatic unsigned int s_format_filtering = 0;
 \tstatic unsigned int s_custom_resolution_filtering[2] = {};
 \t// Filter by reversed depth buffer detection
