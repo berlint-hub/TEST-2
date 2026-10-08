@@ -20,7 +20,10 @@ def replace_once_any(candidates: list[str], new: str):
     global text
     for old in candidates:
         if old in text:
-            text = text.replace(old, new, 1)
+            count = text.count(old)
+            if count != 1:
+                raise AssertionError(f"expected 1 occurrence, found {count} for variant: {old[:80]!r}")
+            text = text.replace(old, new)
             return
     raise AssertionError(f"expected one of {candidates[0][:80]!r} ... to appear exactly once")
 
@@ -101,22 +104,20 @@ replace_once(
 \t};""")
 
 # 5) Add reversed filtering config variable after FilterFormat
-# Tolerant match for comment - upstream may have "heuristic" or just "detection"
+# Upstream: comment line has no tab, static vars have NO leading tabs either
 replace_once_any([
     """// Enable or disable the format check from 'check_depth_format' in the detection heuristic
-\tstatic unsigned int s_format_filtering = 0;
-\tstatic unsigned int s_custom_resolution_filtering[2] = {};""",
+static unsigned int s_format_filtering = 0;
+static unsigned int s_custom_resolution_filtering[2] = {};""",
     """// Enable or disable the format check from 'check_depth_format' in the detection
-\tstatic unsigned int s_format_filtering = 0;
-\tstatic unsigned int s_custom_resolution_filtering[2] = {};""",
+static unsigned int s_format_filtering = 0;
+static unsigned int s_custom_resolution_filtering[2] = {};""",
 ], """// Enable or disable the format check from 'check_depth_format' in the detection heuristic
-\tstatic unsigned int s_format_filtering = 0;
-\tstatic unsigned int s_custom_resolution_filtering[2] = {};
-\t// Filter by reversed depth buffer detection
-\tstatic unsigned int s_reversed_filtering = 0;""")
+static unsigned int s_format_filtering = 0;
+static unsigned int s_custom_resolution_filtering[2] = {};
+static unsigned int s_reversed_filtering = 0;""")
 
 # 6) Add reversed filtering logic in on_begin_render_effects selection
-# EXACT upstream pattern: check_aspect_ratio(..., frame_width, frame_height)
 replace_once(
 """\t\tif (s_format_filtering != 0 && !check_depth_format(info.desc.texture.format))
 \t\t\tcontinue;
