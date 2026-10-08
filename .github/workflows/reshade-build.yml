@@ -36,6 +36,17 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Diagnose environment
+        shell: pwsh
+        run: |
+          cmake --version
+          python --version
+          pip --version
+          where python
+          where pip
+          git -C reshade submodule status
+          Get-ChildItem reshade/deps | Select-Object Name
+
       - name: Apply lowest heuristic patch
         run: python test2/reshade-patch/apply_lowest_heuristic.py reshade
 
@@ -44,7 +55,14 @@ jobs:
         shell: bash
 
       - name: Configure CMake (x64)
-        run: cmake -S reshade -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+        shell: pwsh
+        run: |
+          cmake -S reshade -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+          if ($LASTEXITCODE -ne 0) {
+            echo "=== CMAKE CONFIGURE FAILED, dumping logs ==="
+            Get-ChildItem -Recurse build/CMakeFiles/*.log -ErrorAction SilentlyContinue | ForEach-Object { echo "--- $($_.FullName) ---"; Get-Content $_.FullName -TotalCount 300 }
+            exit 1
+          }
 
       - name: Build Release x64
         run: cmake --build build --config Release --parallel
