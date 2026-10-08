@@ -29,6 +29,7 @@ jobs:
           repository: crosire/reshade
           ref: main
           submodules: recursive
+          fetch-depth: 0
           fetch-tags: true
           path: reshade
 
@@ -37,51 +38,28 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Diagnose environment
-        shell: pwsh
-        run: |
-          cmake --version
-          python --version
-          pip --version
-          git -C reshade submodule status
-          Get-ChildItem reshade/deps | Select-Object Name
+      - name: Setup MSBuild (official build path, generates .cso + version.h)
+        uses: microsoft/setup-msbuild@v2
 
       - name: Apply lowest heuristic patch
         run: python test2/reshade-patch/apply_lowest_heuristic.py reshade
 
-      - name: Generate res/version.h (gitignored, required by CMake)
-        shell: pwsh
-        run: |
-          powershell -ExecutionPolicy Bypass -File reshade/tools/update_version.ps1 reshade/res/version.h
-          Get-Content reshade/res/version.h
-
       - name: Show patched hunk
-        run: git -C reshade diff --stat; git -C reshade diff -- examples/09-depth/generic_depth_addon.cpp | head -n 100
+        run: git -C reshade diff --stat; git -C reshade diff -- examples/09-depth/generic_depth_addon.cpp | head -n 60
         shell: bash
 
-      - name: Configure CMake (x64)
-        shell: pwsh
-        run: |
-          cmake -S reshade -B build -A x64 -DCMAKE_BUILD_TYPE=Release
-          if ($LASTEXITCODE -ne 0) {
-            echo "=== CMAKE CONFIGURE FAILED, dumping logs ==="
-            Get-ChildItem -Recurse build/CMakeFiles/*.log -ErrorAction SilentlyContinue | ForEach-Object { echo "--- $($_.FullName) ---"; Get-Content $_.FullName -TotalCount 300 }
-            exit 1
-          }
-
-      - name: Build Release x64
-        run: cmake --build build --config Release --parallel
+      - name: Build ReShade (64-bit)
+        run: msbuild reshade/ReShade.sln /p:Configuration=Release /p:Platform=64-bit /m
 
       - name: List outputs
-        run: Get-ChildItem -Recurse build | Where-Object { $_.Extension -in '.dll','.addon' } | Select-Object FullName, Length
         shell: pwsh
+        run: |
+          Get-ChildItem -Recurse reshade/bin | Select-Object FullName, Length
 
       - name: Upload ReShade DLLs
         uses: actions/upload-artifact@v4
         with:
           name: ReShade-lowest-depth-${{ github.sha }}
-          path: |
-            build/**/ReShade64.dll
-            build/**/*.addon
+          path: reshade/bin/x64/Release/ReShade64.dll
           if-no-files-found: error
           retention-days: 14
