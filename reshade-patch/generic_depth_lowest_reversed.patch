@@ -1,0 +1,122 @@
+From: berlint-hub
+Subject: [PATCH] Generic Depth: lowest heuristics + filter by reversed depth
+Date: Fri, 09 Oct 2026
+
+Helps depth detection on Vulkan emulators (PCSX2/RPCS3) and DX12 titles
+where the auto-detect keeps jumping between buffers.
+
+Applies against crosire/reshade@main:
+  examples/09-depth/generic_depth_addon.cpp
+
+---
+ examples/09-depth/generic_depth_addon.cpp | 53 ++++++++++++++++++++++++++++++-
+ 1 file changed, 49 insertions(+), 4 deletions(-)
+
+diff --git a/examples/09-depth/generic_depth_addon.cpp b/examples/09-depth/generic_depth_addon.cpp
+index 0000000..0000001 100644
+--- a/examples/09-depth/generic_depth_addon.cpp
++++ b/examples/09-depth/generic_depth_addon.cpp
+@@ -22,6 +22,8 @@ enum class draw_stats_heuristic : unsigned int
+ enum class draw_stats_heuristic : unsigned int
+ {
+ 	prefer_vertices = 0,
+ 	vertices,
+-	drawcalls
++	drawcalls,
++	lowest_vertices,
++	lowest_drawcalls
+ };
+@@ -45,3 +45,5 @@
+ // Enable or disable the format check from 'check_depth_format' in the detection heuristic
+ static unsigned int s_format_filtering = 0;
+ static unsigned int s_custom_resolution_filtering[2] = {};
++// Filter by reversed depth buffer detection (0 = any, 1 = prefer reversed, 2 = exclude reversed)
++static unsigned int s_reversed_filtering = 0;
+@@ -62,8 +64,17 @@ struct draw_stats
+ 	bool operator>(const draw_stats &other) const
+ 	{
++		const bool is_empty = vertices == 0 && drawcalls == 0;
++		const bool other_empty = other.vertices == 0 && other.drawcalls == 0;
++		if (is_empty != other_empty)
++			return other_empty; // Any real stats are better than empty, regardless of heuristic
++
+ 		if (s_draw_stats_heuristic == draw_stats_heuristic::vertices)
+ 			return vertices > other.vertices;
+ 		if (s_draw_stats_heuristic == draw_stats_heuristic::drawcalls)
+ 			return drawcalls > other.drawcalls;
++		if (s_draw_stats_heuristic == draw_stats_heuristic::lowest_vertices)
++			return vertices < other.vertices;
++		if (s_draw_stats_heuristic == draw_stats_heuristic::lowest_drawcalls)
++			return drawcalls < other.drawcalls;
+ 
+ 		return (drawcalls_indirect < (drawcalls / 3) ?
+@@ -430,8 +441,17 @@ static void on_clear_depth_impl(command_list *cmd_list, state_
+ 			if (s_force_clear_index.first == 0)
+ 			{
++				if (s_draw_stats_heuristic == draw_stats_heuristic::lowest_vertices || s_draw_stats_heuristic == draw_stats_heuristic::lowest_drawcalls)
++				{
++					const bool best_empty = state.best_copy_stats.vertices == 0 && state.best_copy_stats.drawcalls == 0;
++					// Inverted logic for lowest heuristics: keep the smallest workload (e.g. for UI / small depth buffers)
++					do_copy = best_empty || current_stats.vertices <= state.best_copy_stats.vertices || (op == clear_op::fullscreen_draw && current_stats.drawcalls <= state.best_copy_stats.drawcalls);
++				}
++				else
++				{
++					// Use greater equals operator here to handle case where the same scene is first rendered into a shadow map and then for real (e.g. Mirror's Edge main menu)
++					do_copy = current_stats.vertices >= state.best_copy_stats.vertices || (op == clear_op::fullscreen_draw && current_stats.drawcalls >= state.best_copy_stats.drawcalls);
++				}
+-				// Use greater equals operator here to handle case where the same scene is first rendered into a shadow map and then for real (e.g. Mirror's Edge main menu)
+-				do_copy = current_stats.vertices >= state.best_copy_stats.vertices || (op == clear_op::fullscreen_draw && current_stats.drawcalls >= state.best_copy_stats.drawcalls);
+ 			}
+@@ -520,6 +540,10 @@ static void on_init_device(device *device)
+ 	reshade::get_config_value(nullptr, "DEPTH", "DrawStatsHeuristic", reinterpret_cast<unsigned int &>(s_draw_stats_heuristic));
++	if (s_draw_stats_heuristic > draw_stats_heuristic::lowest_drawcalls)
++		s_draw_stats_heuristic = draw_stats_heuristic::prefer_vertices;
+ 	reshade::get_config_value(nullptr, "DEPTH", "UseAspectRatioHeuristics", reinterpret_cast<unsigned int &>(s_aspect_ratio_heuristic));
+ 
+ 	reshade::get_config_value(nullptr, "DEPTH", "FilterFormat", s_format_filtering);
++	reshade::get_config_value(nullptr, "DEPTH", "FilterReversed", s_reversed_filtering);
+ 	reshade::get_config_value(nullptr, "DEPTH", "FilterResolutionWidth", s_custom_resolution_filtering[0]);
+ 	reshade::get_config_value(nullptr, "DEPTH", "FilterResolutionHeight", s_custom_resolution_filtering[1]);
+@@ -1000,6 +1024,13 @@ static void on_begin_render_effects(effect_runtime *runtime
+ 		if (s_aspect_ratio_heuristic != aspect_ratio_heuristic::none && !check_aspect_ratio(static_cast<float>(info.desc.texture.width), static_cast<float>(info.desc.texture.height), static_cast<float>(frame_width), static_cast<float>(frame_height)))
+ 			continue; // Not a good fit
+ 
++		// Filter by reversed depth buffer detection
++		const bool is_reversed = info.last_frame_stats.reversed_clear_value;
++		if (s_reversed_filtering == 1 && !is_reversed)
++			continue; // Only allow reversed
++		if (s_reversed_filtering == 2 && is_reversed)
++			continue; // Exclude reversed
++
+ 		if (selected_depth_stencil.handle == 0 ||
+@@ -1215,6 +1246,8 @@ static void draw_settings_overlay(effect_runtime *runtime)
+ 	const char *const draw_stats_heuristic_items[] = {
+ 		"Default",
+ 		"Higher vertices",
+-		"Higher draw calls"
++		"Higher draw calls",
++		"Lowest vertices",
++		"Lowest draw calls"
+ 	};
+@@ -1260,6 +1293,19 @@ static void draw_settings_overlay(effect_runtime *runtime)
+ 	if (ImGui::Combo("Filter by depth buffer format", reinterpret_cast<int *>(&s_format_filtering), depth_format_items, static_cast<int>(std::size(depth_format_items))))
+ 	{
+ 		reshade::set_config_value(nullptr, "DEPTH", "FilterFormat", s_format_filtering);
+ 		force_reset = true;
+ 	}
+ 
++	const char *const reversed_items[] = {
++		"Any",
++		"Prefer reversed",
++		"Exclude reversed"
++	};
++	if (ImGui::Combo("Filter by reversed depth", reinterpret_cast<int *>(&s_reversed_filtering), reversed_items, static_cast<int>(std::size(reversed_items))))
++	{
++		reshade::set_config_value(nullptr, "DEPTH", "FilterReversed", s_reversed_filtering);
++		force_reset = true;
++	}
++
+ 	if (bool copy_before_clear_operations = s_preserve_depth_buffers != 0;
+ 		ImGui::Checkbox("Copy depth buffer before clear operations", &copy_before_clear_operations))
+-- 
+2.47.0
