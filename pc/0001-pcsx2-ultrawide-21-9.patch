@@ -1,8 +1,22 @@
 diff --git a/pcsx2-qt/Settings/GraphicsDisplaySettingsTab.ui b/pcsx2-qt/Settings/GraphicsDisplaySettingsTab.ui
-index 8b895d0..5c69e37 100644
+index 8b895d0..21a3523 100644
 --- a/pcsx2-qt/Settings/GraphicsDisplaySettingsTab.ui
 +++ b/pcsx2-qt/Settings/GraphicsDisplaySettingsTab.ui
-@@ -126,6 +126,11 @@
+@@ -56,6 +56,13 @@
+        </property>
+       </widget>
+      </item>
++     <item row="3" column="1">
++      <widget class="QCheckBox" name="ultrawidePatches">
++       <property name="text">
++        <string>Apply Ultrawide (21:9) Patches</string>
++       </property>
++      </widget>
++     </item>
+      <item row="1" column="0">
+       <widget class="QCheckBox" name="PCRTCAntiBlur">
+        <property name="text">
+@@ -126,6 +133,11 @@
         <string>Native/Full (10:7)</string>
        </property>
       </item>
@@ -14,8 +28,70 @@ index 8b895d0..5c69e37 100644
      </widget>
     </item>
     <item row="4" column="1">
+diff --git a/pcsx2-qt/Settings/GraphicsSettingsWidget.cpp b/pcsx2-qt/Settings/GraphicsSettingsWidget.cpp
+index 7e4fa97..bf0ce9a 100644
+--- a/pcsx2-qt/Settings/GraphicsSettingsWidget.cpp
++++ b/pcsx2-qt/Settings/GraphicsSettingsWidget.cpp
+@@ -83,6 +83,7 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* settings_dialog,
+ 		sif, m_display.bilinearFiltering, "EmuCore/GS", "linear_present_mode", static_cast<int>(GSPostBilinearMode::BilinearSmooth));
+ 	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_display.widescreenPatches, "EmuCore", "EnableWideScreenPatches", false);
+ 	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_display.noInterlacingPatches, "EmuCore", "EnableNoInterlacingPatches", false);
++	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_display.ultrawidePatches, "EmuCore", "EnableUltrawidePatches", false);
+ 	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_display.integerScaling, "EmuCore/GS", "IntegerScaling", false);
+ 	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_display.PCRTCOffsets, "EmuCore/GS", "pcrtc_offsets", false);
+ 	SettingWidgetBinder::BindWidgetToBoolSetting(sif, m_display.PCRTCOverscan, "EmuCore/GS", "pcrtc_overscan", false);
+@@ -349,6 +350,25 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* settings_dialog,
+ 			needs_save = true;
+ 		}
+ 
++		if (si->ContainsValue("EmuCore", "EnableUltrawidePatches"))
++		{
++			const bool uw_enabled = si->GetBoolValue("EmuCore", "EnableUltrawidePatches");
++			si->DeleteValue("EmuCore", "EnableUltrawidePatches");
++
++			const char* UW_PATCH_NAME = "Widescreen 21:9";
++			if (uw_enabled)
++			{
++				si->AddToStringList(Patch::PATCHES_CONFIG_SECTION, Patch::PATCH_ENABLE_CONFIG_KEY, UW_PATCH_NAME);
++				si->RemoveFromStringList(Patch::PATCHES_CONFIG_SECTION, Patch::PATCH_DISABLE_CONFIG_KEY, UW_PATCH_NAME);
++			}
++			else
++			{
++				si->AddToStringList(Patch::PATCHES_CONFIG_SECTION, Patch::PATCH_DISABLE_CONFIG_KEY, UW_PATCH_NAME);
++				si->RemoveFromStringList(Patch::PATCHES_CONFIG_SECTION, Patch::PATCH_ENABLE_CONFIG_KEY, UW_PATCH_NAME);
++			}
++			needs_save = true;
++		}
++
+ 		if (needs_save)
+ 		{
+ 			dialog()->saveAndReloadGameSettings();
+@@ -356,10 +376,13 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* settings_dialog,
+ 
+ 		m_display.displayGridLayout->removeWidget(m_display.widescreenPatches);
+ 		m_display.displayGridLayout->removeWidget(m_display.noInterlacingPatches);
++		m_display.displayGridLayout->removeWidget(m_display.ultrawidePatches);
+ 		m_display.widescreenPatches->deleteLater();
+ 		m_display.noInterlacingPatches->deleteLater();
++		m_display.ultrawidePatches->deleteLater();
+ 		m_display.widescreenPatches = nullptr;
+ 		m_display.noInterlacingPatches = nullptr;
++		m_display.ultrawidePatches = nullptr;
+ 	}
+ 
+ 	// Capture settings
+@@ -426,6 +449,9 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* settings_dialog,
+ 		dialog()->registerWidgetHelp(m_display.noInterlacingPatches, tr("Apply No-Interlacing Patches"), tr("Unchecked"),
+ 			tr("Automatically loads and applies no-interlacing patches on game start. Can cause issues."));
+ 
++		dialog()->registerWidgetHelp(m_display.ultrawidePatches, tr("Apply Ultrawide (21:9) Patches"), tr("Unchecked"),
++			tr("Automatically loads and applies patch sections named 'Widescreen 21:9' on game start. Takes precedence over Apply Widescreen Patches; pair it with the Ultrawide (21:9) aspect ratio. Can cause issues."));
++
+ 		dialog()->registerWidgetHelp(m_display.disableInterlaceOffset, tr("Disable Interlace Offset"), tr("Unchecked"),
+ 			tr("Disables interlacing offset which may reduce blurring in some situations."));
+ 
 diff --git a/pcsx2/Config.h b/pcsx2/Config.h
-index a8a23c6..45e8992 100644
+index a8a23c6..33fb76a 100644
 --- a/pcsx2/Config.h
 +++ b/pcsx2/Config.h
 @@ -228,6 +228,7 @@ enum class AspectRatioType : u8
@@ -26,6 +102,14 @@ index a8a23c6..45e8992 100644
  	MaxCount
  };
  
+@@ -1360,6 +1361,7 @@ struct Pcsx2Config
+ 		EnablePINE : 1, // enables inter-process communication
+ 		EnableWideScreenPatches : 1,
+ 		EnableNoInterlacingPatches : 1,
++		EnableUltrawidePatches : 1,
+ 		EnableFastBoot : 1,
+ 		EnableFastBootFastForward : 1,
+ 		EnableThreadPinning : 1,
 diff --git a/pcsx2/GS/Renderers/Common/GSRenderer.cpp b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
 index b5c7cc6..1ea790a 100644
 --- a/pcsx2/GS/Renderers/Common/GSRenderer.cpp
@@ -50,8 +134,48 @@ index b5c7cc6..1ea790a 100644
  
  	const float crop_adjust = (static_cast<float>(src_rect.width()) / static_cast<float>(src_size.x)) /
  		(static_cast<float>(src_rect.height()) / static_cast<float>(src_size.y));
+diff --git a/pcsx2/Patch.cpp b/pcsx2/Patch.cpp
+index 05be983..daaa5c8 100644
+--- a/pcsx2/Patch.cpp
++++ b/pcsx2/Patch.cpp
+@@ -114,6 +114,7 @@ namespace Patch
+ 	// Name of patches which will be auto-enabled based on global options.
+ 	static constexpr std::string_view WS_PATCH_NAME = "Widescreen 16:9";
+ 	static constexpr std::string_view NI_PATCH_NAME = "No-Interlacing";
++	static constexpr std::string_view UW_PATCH_NAME = "Widescreen 21:9";
+ 	static constexpr std::string_view PATCHES_ZIP_NAME = "patches.zip";
+ 
+ 	const char* PATCHES_CONFIG_SECTION = "Patches";
+@@ -594,7 +595,17 @@ void Patch::ReloadEnabledLists()
+ 	const std::vector<std::string> disabled_patches = Host::GetStringListSetting(PATCHES_CONFIG_SECTION, PATCH_DISABLE_CONFIG_KEY);
+ 
+ 	// Name based matching for widescreen/NI settings.
+-	if (EmuConfig.EnableWideScreenPatches)
++	// Ultrawide takes precedence over widescreen: both target the same patch
++	// addresses, so auto-enabling the two together would make them fight.
++	if (EmuConfig.EnableUltrawidePatches)
++	{
++		if (std::none_of(s_enabled_patches.begin(), s_enabled_patches.end(),
++				[](const std::string& it) { return (it == UW_PATCH_NAME); }))
++		{
++			s_enabled_patches.emplace_back(UW_PATCH_NAME);
++		}
++	}
++	else if (EmuConfig.EnableWideScreenPatches)
+ 	{
+ 		if (std::none_of(s_enabled_patches.begin(), s_enabled_patches.end(),
+ 				[](const std::string& it) { return (it == WS_PATCH_NAME); }))
+@@ -1183,7 +1194,7 @@ u32 Patch::GetAllActivePatchesCount()
+ 
+ bool Patch::IsGloballyToggleablePatch(const PatchInfo& patch_info)
+ {
+-	return patch_info.name == WS_PATCH_NAME || patch_info.name == NI_PATCH_NAME;
++	return patch_info.name == WS_PATCH_NAME || patch_info.name == NI_PATCH_NAME || patch_info.name == UW_PATCH_NAME;
+ }
+ 
+ void Patch::ApplyDynamicPatches(u32 pc)
 diff --git a/pcsx2/Pcsx2Config.cpp b/pcsx2/Pcsx2Config.cpp
-index 2a99824..8a57985 100644
+index 2a99824..5f3e11e 100644
 --- a/pcsx2/Pcsx2Config.cpp
 +++ b/pcsx2/Pcsx2Config.cpp
 @@ -642,6 +642,7 @@ const char* Pcsx2Config::GSOptions::AspectRatioNames[(size_t)AspectRatioType::Ma
@@ -62,8 +186,24 @@ index 2a99824..8a57985 100644
  	nullptr};
  
  const char* Pcsx2Config::GSOptions::FMVAspectRatioSwitchNames[(size_t)FMVAspectRatioSwitchType::MaxCount + 1] = {
+@@ -2004,6 +2005,7 @@ void Pcsx2Config::LoadSaveCore(SettingsWrapper& wrap)
+ 	SettingsWrapBitBool(EnablePINE);
+ 	SettingsWrapBitBool(EnableWideScreenPatches);
+ 	SettingsWrapBitBool(EnableNoInterlacingPatches);
++	SettingsWrapBitBool(EnableUltrawidePatches);
+ 	SettingsWrapBitBool(EnableFastBoot);
+ 	SettingsWrapBitBool(EnableFastBootFastForward);
+ 	SettingsWrapBitBool(EnableThreadPinning);
+@@ -2151,6 +2153,7 @@ void Pcsx2Config::ClearInvalidPerGameConfiguration(SettingsInterface* si)
+ 	// Deprecated in favor of patches.
+ 	si->DeleteValue("EmuCore", "EnableWideScreenPatches");
+ 	si->DeleteValue("EmuCore", "EnableNoInterlacingPatches");
++	si->DeleteValue("EmuCore", "EnableUltrawidePatches");
+ }
+ 
+ void EmuFolders::SetAppRoot()
 diff --git a/pcsx2/VMManager.cpp b/pcsx2/VMManager.cpp
-index 082d574..95114cd 100644
+index 082d574..6141589 100644
 --- a/pcsx2/VMManager.cpp
 +++ b/pcsx2/VMManager.cpp
 @@ -948,6 +948,9 @@ void VMManager::RequestDisplaySize(float scale /*= 0.0f*/)
@@ -76,3 +216,11 @@ index 082d574..95114cd 100644
  		case AspectRatioType::Stretch:
  		default:
  			x_scale = 1.0f;
+@@ -3054,6 +3057,7 @@ void VMManager::CheckForPatchConfigChanges(const Pcsx2Config& old_config)
+ 	if (EmuConfig.EnableCheats == old_config.EnableCheats &&
+ 		EmuConfig.EnableWideScreenPatches == old_config.EnableWideScreenPatches &&
+ 		EmuConfig.EnableNoInterlacingPatches == old_config.EnableNoInterlacingPatches &&
++		EmuConfig.EnableUltrawidePatches == old_config.EnableUltrawidePatches &&
+ 		EmuConfig.EnablePatches == old_config.EnablePatches)
+ 	{
+ 		return;

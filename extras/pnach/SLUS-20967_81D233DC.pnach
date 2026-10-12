@@ -17,10 +17,10 @@ patch=1,EE,00383708,word,3F400000
 patch=1,EE,00383728,word,3F400000
 
 
-[Widescreen 21:9 (2.33)]
+[Widescreen 21:9]
 gsaspectratio=21:9
 author=No.47 (16:9 base), 21:9 rescale
-description=Renders the game in 21:9 (2.333) aspect ratio. Pair with the Ultrawide (21:9) display option, or leave Aspect Ratio on Auto 4:3/3:2 in stock PCSX2.
+description=Renders the game in 21:9 (2.333) aspect ratio. Auto-enabled by "Apply Ultrawide (21:9) Patches" in the custom build (section name must be exactly "Widescreen 21:9"). Pair with the Ultrawide (21:9) display option, or leave Aspect Ratio on Auto 4:3/3:2 in stock PCSX2.
 patch=1,EE,00383708,word,3F124925
 patch=1,EE,00383728,word,3F124925
 
