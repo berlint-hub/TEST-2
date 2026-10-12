@@ -12,13 +12,15 @@ Open: **https://github.com/PCSX2/pcsx2/issues/new?template=feature_request.yaml*
 
 # Field: Description
 
-I'd like native ultrawide support, consisting of three opt-in pieces (working implementation attached below):
+Since #12537, widescreen/ultrawide patches can specify their target aspect ratio via `gsaspectratio` and the presentation sizes itself accordingly -- which is great. What's still missing is the *supply side*: there is no auto-apply path for 21:9 sections (like `Apply Widescreen Patches` has for 16:9), so every ultrawide game still needs a hand-made, hand-enabled pnach, and the hundreds of existing 16:9 patches in the archive can't be reused.
+
+I'd like to close that gap with three opt-in pieces (working implementation attached below):
 
 1. **New aspect ratio option `Ultrawide (21:9)`** in Graphics > Display (enum `R21_9`, ini value `"21:9"`), wired through the draw-rect calculation, display AR for capture, screenshot x-scale, and the AR cycle hotkey.
 
 2. **New checkbox `Apply Ultrawide (21:9) Patches`** (`EmuCore/EnableUltrawidePatches`) next to `Apply Widescreen Patches`. It reuses the existing name-based auto-activation mechanism, matching patch sections named exactly `Widescreen 21:9`. When both checkboxes are on, 21:9 takes precedence, because 16:9/21:9 sections write the same addresses and would fight each other.
 
-3. **Automatic 21:9 synthesis from existing 16:9 patches** (runs only when the new checkbox is enabled): when a game has a `Widescreen 16:9` section but no native 21:9 one, a `Widescreen 21:9` group is synthesized at patch load by rescaling only bit-recognizable aspect constants (`0.75 -> 4/7`, `0.5625 -> 9/21`, `16/9 -> 21/9`, `4/3 -> 7/4`, plus the MIPS `lui` upper-half pattern). Strict whitelist - zoom/FOV/code values pass through untouched, and if nothing was rescaled the synthetic group is discarded entirely. Hand-tuned native 21:9 sections always win.
+3. **Automatic 21:9 synthesis from existing 16:9 patches** (runs only when the new checkbox is enabled): when a game has a `Widescreen 16:9` section but no native 21:9 one, a `Widescreen 21:9` group is synthesized at patch load by rescaling only bit-recognizable aspect constants (`0.75 -> 4/7`, `0.5625 -> 9/21`, `16/9 -> 21/9`, `4/3 -> 7/4`, plus the MIPS `lui` upper-half pattern). Strict whitelist - zoom/FOV/code values pass through untouched, and if nothing was rescaled the synthetic group is discarded entirely. Hand-tuned native 21:9 sections always win. The synthesized group sets `override_aspect_ratio = 21/9`, so it plugs straight into the presentation mechanism merged in #12537.
 
 Step by step, as a user:
 1. Set Aspect Ratio to `Ultrawide (21:9)`.
@@ -32,9 +34,9 @@ I'm happy to open this as a PR (whole, split, or without item 3 if the heuristic
 
 # Field: Reason
 
-- Ultrawide monitors are common now, and PCSX2 only offers Stretch/4:3/16:9/10:7 - 21:9 users must distort the image or letterbox.
-- The widescreen patch archive already contains the per-game geometry hacks needed; their constants rescale cleanly to 21:9 (the few hand-made 21:9 pnachs around do exactly this by hand). Item 3 makes the existing archive usable on 21:9 displays without duplicating hundreds of pnach files.
-- `gsaspectratio=21:9` in pnach + Auto already displays correctly today, but there is no explicit display option and no auto-apply path like 16:9 has, so each game needs a hand-made pnach.
+- Ultrawide monitors are common now. #12537 solved the *display* side for patches that declare their AR, but the *content* side still requires a hand-made 21:9 pnach per game, enabled manually per game - while 16:9 users get a single global checkbox and a complete archive.
+- The widescreen patch archive already contains the per-game geometry hacks needed; their constants rescale cleanly to 21:9 (the few hand-made 21:9 pnachs around do exactly this by hand). Item 3 makes the existing archive usable on 21:9 displays without anyone having to duplicate and maintain hundreds of pnach files.
+- Items 1+2 give 21:9 users the same one-time setup that 16:9 users already enjoy: pick the ratio, tick one box, done.
 
 # Field: Examples
 
