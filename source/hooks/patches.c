@@ -264,6 +264,23 @@ static void detect_core_version(void) {
 #define VU_STEAL_4248_LVL1   0x53017D08u
 #define VU_STEAL_4248_LVL2   0x2A0803E8u
 
+// Ultrawide display aspect (launcher "21:9"), 4248-only. The core maps the
+// AspectRatio enum through a 5-entry float table in .rodata at 0x16cdc4:
+//   {4:3 (Stretch slot, unused), 4:3 (Auto), 4:3, 16:9, 3:2 (Auto FMV)}
+// Sole consumer is the aspect-fit in the display-rect update:
+//   0x62a478/7c: ADRP+ADD x11 -> 0x16cdc4
+//   0x62a490:    LDR s3, [x11, x8, lsl #2]   (x8 = enum idx, +3 while FMV+Auto)
+// 0x16cdd0 is the 16:9 slot (0x3FE38E39, the only 16/9f in the binary);
+// rewriting it to 21/9f turns the "16:9" selection ultrawide. Data-only
+// patch at core load, before any core code runs. The pref is rewritten to
+// "16:9" either way so the core's enum-name parser never sees "21:9"
+// (unknown names would warn + fall back). With FMVAspectRatioSwitch=16:9
+// FMVs share the patched slot and letterbox to 21:9 too; keep it Off/4:3.
+// Changing the menu needs a game restart, like the other load-time patches.
+#define UW_ASPECT_4248_ADDR   0x16cdd0u
+#define UW_ASPECT_4248_EXPECT 0x3FE38E39u  // 16/9f
+#define UW_ASPECT_4248_21_9   0x40155555u  // 21/9f
+
 static void patch_vu_steal_4248(void) {
   if (g_core_version != CORE_VER_V22N_4248)
     return;
@@ -279,8 +296,30 @@ static void patch_vu_steal_4248(void) {
   *p = (level == 1) ? VU_STEAL_4248_LVL1 : VU_STEAL_4248_LVL2;
 }
 
+static void patch_ultrawide_aspect(void) {
+  const char *ar = prefs_get_string("EmuCore/GS/AspectRatio", "");
+  if (strcmp(ar, "21:9") != 0)
+    return;
+  // The core must always see a valid enum name; the table patch below decides
+  // whether "16:9" actually renders 21:9 (4248) or stays plain 16:9 (fallback).
+  prefs_set_string("EmuCore/GS/AspectRatio", "16:9");
+  if (g_core_version != CORE_VER_V22N_4248)
+    return;
+  if (!in_range(UW_ASPECT_4248_ADDR, 4))
+    return;
+  volatile uint32_t *p =
+      (volatile uint32_t *)((uintptr_t)emu_mod.load_base + UW_ASPECT_4248_ADDR);
+  if (*p != UW_ASPECT_4248_EXPECT)
+    return;
+  *p = UW_ASPECT_4248_21_9;
+}
+
 void patch_game(void) {
   detect_core_version();
+
+  // Runs even for unknown cores: the pref must be translated to a valid enum
+  // name regardless of whether the table patch applies.
+  patch_ultrawide_aspect();
 
   if (g_core_version == CORE_VER_UNKNOWN)
     return;

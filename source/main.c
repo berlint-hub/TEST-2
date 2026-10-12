@@ -421,10 +421,15 @@ static void run_startup_sequence(void) {
   prefs_set_bool("EmuCore/Speedhacks/fastCDVD", false);
   // AspectRatio is a PCSX2 enum NAME; repair an invalid value, else respect the
   // user's. The core reads this pref directly to aspect-fit + centre the display.
+  // "21:9" is launcher-only: patch_game() already mapped it to "16:9" (and
+  // rewrote the core's aspect table on 4248); keep the mapping here as a
+  // belt-and-braces so it can never degrade to the 4:3 repair path.
   {
     const char *ar = prefs_get_string("EmuCore/GS/AspectRatio", "");
-    if (strcmp(ar, "Stretch") && strcmp(ar, "Auto 4:3/3:2") && strcmp(ar, "4:3") &&
-        strcmp(ar, "16:9"))
+    if (!strcmp(ar, "21:9"))
+      prefs_set_string("EmuCore/GS/AspectRatio", "16:9");
+    else if (strcmp(ar, "Stretch") && strcmp(ar, "Auto 4:3/3:2") && strcmp(ar, "4:3") &&
+             strcmp(ar, "16:9"))
       prefs_set_string("EmuCore/GS/AspectRatio", "4:3");
   }
   // Neutral display geometry -- the renderer handles centring itself.
