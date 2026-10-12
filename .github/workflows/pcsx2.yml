@@ -1,16 +1,11 @@
-name: PCSX2
+name: Switch (NetherSX2)
 
-# Dev build pipeline for the arena working branch.
+# Dev build pipeline for the arena working branch (Nintendo Switch .nro).
 # Same recipe as build.yml (nxvk SDK -> full VK-only bundle -> artifacts),
-# but without the rolling release job. Triggers on pushes to the arena
-# session branch and on manual dispatch.
+# but without the rolling release job. Manual dispatch only -- the PC build
+# (pcsx2-pc.yml) is the primary pipeline on this branch.
 
 on:
-  push:
-    branches: ["arena/7efa07ef-test-2"]
-    paths-ignore:
-      - "**.md"
-      - "extras/**"
   workflow_dispatch:
     inputs:
       cores_tarball_url:

@@ -1,0 +1,133 @@
+name: PCSX2 PC (Windows)
+
+# Builds upstream PCSX2 (pcsx2/pcsx2) for Windows x64 with the local
+# Ultrawide 21:9 aspect-ratio patch (pc/0001-pcsx2-ultrawide-21-9.patch)
+# applied on top. Mirrors upstream's CMake/MSVC CI recipe:
+#   deps:  .github/workflows/scripts/windows/build-dependencies.bat
+#          (Qt, ffmpeg, ... -> cached under the same key scheme as upstream)
+#   build: cmake -G Ninja + Qt build, artifact = portable bin/ folder.
+# The upstream checkout is pinned to PCSX2_REF for patch reproducibility;
+# bump the ref together with the patch when tracking newer master.
+
+on:
+  push:
+    branches: ["arena/7efa07ef-test-2"]
+    paths:
+      - "pc/**"
+      - ".github/workflows/pcsx2-pc.yml"
+  workflow_dispatch:
+    inputs:
+      pcsx2_ref:
+        description: "pcsx2/pcsx2 ref to build (default: pinned master)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pcsx2-pc-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PCSX2_REF: ${{ inputs.pcsx2_ref != '' && inputs.pcsx2_ref || '0f71e668b8adc950db7de1b1b15c2f5080c102e9' }}
+  POWERSHELL_TELEMETRY_OPTOUT: 1
+
+jobs:
+  deps:
+    name: "Dependencies (cached)"
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 90
+    steps:
+      - name: Checkout PCSX2 (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: PCSX2/pcsx2
+          ref: ${{ env.PCSX2_REF }}
+
+      - name: Check dependency cache
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          lookup-only: true
+          path: deps
+          key: windows-2025-vs2026 x64 deps ${{ hashFiles('.github/workflows/scripts/windows/build-dependencies.bat', '.github/workflows/scripts/common/*.patch') }}
+
+      - name: Build dependencies
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        env:
+          DEBUG: 0
+        run: .github/workflows/scripts/windows/build-dependencies.bat
+
+  build:
+    name: "Build PCSX2 + UW 21:9"
+    needs: deps
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 60
+    steps:
+      - name: Checkout PCSX2 (pinned)
+        uses: actions/checkout@v4
+        with:
+          repository: PCSX2/pcsx2
+          ref: ${{ env.PCSX2_REF }}
+
+      - name: Checkout patch overlay (this repo)
+        uses: actions/checkout@v4
+        with:
+          path: _overlay
+
+      - name: Apply Ultrawide 21:9 patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --stat --apply _overlay/pc/0001-pcsx2-ultrawide-21-9.patch
+          echo "Patched:"
+          grep -n "R21_9" pcsx2/Config.h
+
+      - name: Locate vcvars
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`call vswhere -latest -property installationPath`) do set "VSINSTPATH=%%i"
+          echo VCVARSPATH=%VSINSTPATH%\VC\Auxiliary\Build\vcvars64.bat>>%GITHUB_ENV%
+
+      - name: Download game patches (patches.zip)
+        shell: cmd
+        run: |
+          cd bin/resources
+          aria2c -Z "https://github.com/PCSX2/pcsx2_patches/releases/latest/download/patches.zip"
+
+      - name: Restore dependencies
+        uses: actions/cache@v4
+        with:
+          fail-on-cache-miss: true
+          path: deps
+          key: windows-2025-vs2026 x64 deps ${{ hashFiles('.github/workflows/scripts/windows/build-dependencies.bat', '.github/workflows/scripts/common/*.patch') }}
+
+      - name: Generate CMake
+        shell: cmd
+        run: |
+          call "%VCVARSPATH%" || exit /b
+          cmake . -B build "-DCMAKE_PREFIX_PATH=%cd%\deps" -DQT_BUILD=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON -DDISABLE_ADVANCE_SIMD=ON -G Ninja
+
+      - name: Build PCSX2
+        shell: cmd
+        run: |
+          call "%VCVARSPATH%" || exit /b
+          cmake --build build --config Release || exit /b
+          cmake --install build --config Release || exit /b
+          del bin\resources\fonts\Twemoji* 2>nul
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PCSX2-windows-x64-ultrawide-${{ github.sha }}
+          retention-days: 14
+          path: |
+            ./bin
+            !./bin/**/*.bsc
+            !./bin/**/*.exp
+            !./bin/**/*.ilk
+            !./bin/**/*.iobj
+            !./bin/**/*.ipdb
+            !./bin/**/*.pdb
+            !./bin/**/*.lib

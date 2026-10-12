@@ -1,0 +1,78 @@
+diff --git a/pcsx2-qt/Settings/GraphicsDisplaySettingsTab.ui b/pcsx2-qt/Settings/GraphicsDisplaySettingsTab.ui
+index 8b895d0..5c69e37 100644
+--- a/pcsx2-qt/Settings/GraphicsDisplaySettingsTab.ui
++++ b/pcsx2-qt/Settings/GraphicsDisplaySettingsTab.ui
+@@ -126,6 +126,11 @@
+        <string>Native/Full (10:7)</string>
+       </property>
+      </item>
++     <item>
++      <property name="text">
++       <string>Ultrawide (21:9)</string>
++      </property>
++     </item>
+     </widget>
+    </item>
+    <item row="4" column="1">
+diff --git a/pcsx2/Config.h b/pcsx2/Config.h
+index a8a23c6..45e8992 100644
+--- a/pcsx2/Config.h
++++ b/pcsx2/Config.h
+@@ -228,6 +228,7 @@ enum class AspectRatioType : u8
+ 	R4_3,
+ 	R16_9,
+ 	R10_7,
++	R21_9,
+ 	MaxCount
+ };
+ 
+diff --git a/pcsx2/GS/Renderers/Common/GSRenderer.cpp b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
+index b5c7cc6..1ea790a 100644
+--- a/pcsx2/GS/Renderers/Common/GSRenderer.cpp
++++ b/pcsx2/GS/Renderers/Common/GSRenderer.cpp
+@@ -306,6 +306,8 @@ static float GetCurrentAspectRatioFloat(bool is_progressive)
+ 			return 16.0f / 9.0f;
+ 		case AspectRatioType::R10_7:
+ 			return 10.0f / 7.0f;
++		case AspectRatioType::R21_9:
++			return 21.0f / 9.0f;
+ 	}
+ }
+ 
+@@ -338,6 +340,10 @@ static GSVector4 CalculateDrawDstRect(s32 window_width, s32 window_height, const
+ 	{
+ 		targetAr = 10.0f / 7.0f;
+ 	}
++	else if (EmuConfig.CurrentAspectRatio == AspectRatioType::R21_9)
++	{
++		targetAr = 21.0f / 9.0f;
++	}
+ 
+ 	const float crop_adjust = (static_cast<float>(src_rect.width()) / static_cast<float>(src_size.x)) /
+ 		(static_cast<float>(src_rect.height()) / static_cast<float>(src_size.y));
+diff --git a/pcsx2/Pcsx2Config.cpp b/pcsx2/Pcsx2Config.cpp
+index 2a99824..8a57985 100644
+--- a/pcsx2/Pcsx2Config.cpp
++++ b/pcsx2/Pcsx2Config.cpp
+@@ -642,6 +642,7 @@ const char* Pcsx2Config::GSOptions::AspectRatioNames[(size_t)AspectRatioType::Ma
+ 	"4:3",
+ 	"16:9",
+ 	"10:7",
++	"21:9",
+ 	nullptr};
+ 
+ const char* Pcsx2Config::GSOptions::FMVAspectRatioSwitchNames[(size_t)FMVAspectRatioSwitchType::MaxCount + 1] = {
+diff --git a/pcsx2/VMManager.cpp b/pcsx2/VMManager.cpp
+index 082d574..95114cd 100644
+--- a/pcsx2/VMManager.cpp
++++ b/pcsx2/VMManager.cpp
+@@ -948,6 +948,9 @@ void VMManager::RequestDisplaySize(float scale /*= 0.0f*/)
+ 		case AspectRatioType::R10_7:
+ 			x_scale = (10.0f / 7.0f) / (static_cast<float>(iwidth) / static_cast<float>(iheight));
+ 			break;
++		case AspectRatioType::R21_9:
++			x_scale = (21.0f / 9.0f) / (static_cast<float>(iwidth) / static_cast<float>(iheight));
++			break;
+ 		case AspectRatioType::Stretch:
+ 		default:
+ 			x_scale = 1.0f;
