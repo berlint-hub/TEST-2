@@ -29,7 +29,7 @@ index 8b895d0..21a3523 100644
     </item>
     <item row="4" column="1">
 diff --git a/pcsx2-qt/Settings/GraphicsSettingsWidget.cpp b/pcsx2-qt/Settings/GraphicsSettingsWidget.cpp
-index 7e4fa97..bf0ce9a 100644
+index 7e4fa97..879ec47 100644
 --- a/pcsx2-qt/Settings/GraphicsSettingsWidget.cpp
 +++ b/pcsx2-qt/Settings/GraphicsSettingsWidget.cpp
 @@ -83,6 +83,7 @@ GraphicsSettingsWidget::GraphicsSettingsWidget(SettingsWindow* settings_dialog,
@@ -85,7 +85,7 @@ index 7e4fa97..bf0ce9a 100644
  			tr("Automatically loads and applies no-interlacing patches on game start. Can cause issues."));
  
 +		dialog()->registerWidgetHelp(m_display.ultrawidePatches, tr("Apply Ultrawide (21:9) Patches"), tr("Unchecked"),
-+			tr("Automatically loads and applies patch sections named 'Widescreen 21:9' on game start. Takes precedence over Apply Widescreen Patches; pair it with the Ultrawide (21:9) aspect ratio. Can cause issues."));
++			tr("Automatically loads and applies patch sections named 'Widescreen 21:9' on game start. When a game only has a 16:9 widescreen patch, a 21:9 version is synthesized from it by rescaling the recognized aspect constants. Takes precedence over Apply Widescreen Patches; pair it with the Ultrawide (21:9) aspect ratio. Can cause issues."));
 +
  		dialog()->registerWidgetHelp(m_display.disableInterlaceOffset, tr("Disable Interlace Offset"), tr("Unchecked"),
  			tr("Disables interlacing offset which may reduce blurring in some situations."));
@@ -135,10 +135,19 @@ index b5c7cc6..1ea790a 100644
  	const float crop_adjust = (static_cast<float>(src_rect.width()) / static_cast<float>(src_size.x)) /
  		(static_cast<float>(src_rect.height()) / static_cast<float>(src_size.y));
 diff --git a/pcsx2/Patch.cpp b/pcsx2/Patch.cpp
-index 05be983..daaa5c8 100644
+index 05be983..ef2d4fe 100644
 --- a/pcsx2/Patch.cpp
 +++ b/pcsx2/Patch.cpp
-@@ -114,6 +114,7 @@ namespace Patch
+@@ -82,6 +82,8 @@ namespace Patch
+ 		const std::span<const PatchTextTable>& Table);
+ 	static void LoadPatchLine(PatchGroup* group, const std::string_view line);
+ 	static u32 LoadPatchesFromString(std::vector<PatchGroup>* patch_list, const std::string& patch_file);
++	static bool ConvertWSWordToUW(u32 value, u32* out);
++	static void SynthesizeUltrawidePatches(std::vector<PatchGroup>* patch_list);
+ 	static bool OpenPatchesZip();
+ 	static std::string GetPnachTemplate(
+ 		const std::string_view serial, u32 crc, bool include_serial, bool add_wildcard, bool all_crcs);
+@@ -114,6 +116,7 @@ namespace Patch
  	// Name of patches which will be auto-enabled based on global options.
  	static constexpr std::string_view WS_PATCH_NAME = "Widescreen 16:9";
  	static constexpr std::string_view NI_PATCH_NAME = "No-Interlacing";
@@ -146,7 +155,7 @@ index 05be983..daaa5c8 100644
  	static constexpr std::string_view PATCHES_ZIP_NAME = "patches.zip";
  
  	const char* PATCHES_CONFIG_SECTION = "Patches";
-@@ -594,7 +595,17 @@ void Patch::ReloadEnabledLists()
+@@ -594,7 +597,17 @@ void Patch::ReloadEnabledLists()
  	const std::vector<std::string> disabled_patches = Host::GetStringListSetting(PATCHES_CONFIG_SECTION, PATCH_DISABLE_CONFIG_KEY);
  
  	// Name based matching for widescreen/NI settings.
@@ -165,7 +174,129 @@ index 05be983..daaa5c8 100644
  	{
  		if (std::none_of(s_enabled_patches.begin(), s_enabled_patches.end(),
  				[](const std::string& it) { return (it == WS_PATCH_NAME); }))
-@@ -1183,7 +1194,7 @@ u32 Patch::GetAllActivePatchesCount()
+@@ -714,6 +727,113 @@ u32 Patch::EnablePatches(const std::vector<PatchGroup>* patches, const std::vect
+ 	return count;
+ }
+ 
++// Rescales the common 16:9 widescreen-hack float constants to their 21:9
++// equivalents. Only bit-for-bit recognizable aspect constants are touched;
++// anything else (zoom factors, FOV tweaks, code patches) passes through
++// unchanged. Also handles the MIPS LUI pattern where the upper half of the
++// float lives in the instruction immediate (lower half is truncated there,
++// which costs at most ~0.2% of ratio accuracy -- visually irrelevant).
++bool Patch::ConvertWSWordToUW(u32 value, u32* out)
++{
++	static constexpr const std::pair<float, float> s_ws_to_uw[] = {
++		{3.0f / 4.0f, 4.0f / 7.0f}, // x-compress: (4:3)/(16:9) -> (4:3)/(21:9)
++		{9.0f / 16.0f, 9.0f / 21.0f}, // inverse aspect: 9/16 -> 9/21
++		{16.0f / 9.0f, 21.0f / 9.0f}, // aspect: 16/9 -> 21/9
++		{4.0f / 3.0f, 7.0f / 4.0f}, // x-stretch: (16:9)/(4:3) -> (21:9)/(4:3)
++	};
++
++	float f;
++	std::memcpy(&f, &value, sizeof(f));
++	for (const auto& [ws, uw] : s_ws_to_uw)
++	{
++		const float diff = (f > ws) ? (f - ws) : (ws - f);
++		if (diff <= ws * 0.002f)
++		{
++			std::memcpy(out, &uw, sizeof(*out));
++			return true;
++		}
++	}
++
++	// MIPS LUI rt, imm16 with the float's upper half in the immediate.
++	if ((value >> 26) == 0x0F)
++	{
++		const u32 imm = value & 0xFFFFu;
++		for (const auto& [ws, uw] : s_ws_to_uw)
++		{
++			u32 wsb, uwb;
++			std::memcpy(&wsb, &ws, sizeof(wsb));
++			std::memcpy(&uwb, &uw, sizeof(uwb));
++			if (imm == (wsb >> 16))
++			{
++				*out = (value & 0xFFFF0000u) | (uwb >> 16);
++				return true;
++			}
++		}
++	}
++
++	return false;
++}
++
++// When a game only ships a "Widescreen 16:9" section, synthesize a
++// "Widescreen 21:9" group from it by rescaling the recognized aspect
++// constants (same patch addresses, adjusted values). Skipped when the game
++// already has a native 21:9 section. The synthesized group participates in
++// name-based activation like any other, i.e. it is picked up by the
++// "Apply Ultrawide (21:9) Patches" toggle or a manual per-game enable.
++void Patch::SynthesizeUltrawidePatches(std::vector<PatchGroup>* patch_list)
++{
++	if (std::any_of(patch_list->begin(), patch_list->end(),
++			[](const PatchGroup& g) { return g.name == UW_PATCH_NAME; }))
++	{
++		return;
++	}
++
++	const auto ws_it = std::find_if(patch_list->begin(), patch_list->end(),
++		[](const PatchGroup& g) { return g.name == WS_PATCH_NAME; });
++	if (ws_it == patch_list->end() || !ws_it->dpatches.empty())
++		return;
++
++	PatchGroup uw;
++	uw.name = UW_PATCH_NAME;
++	uw.override_aspect_ratio = 21.0f / 9.0f;
++	uw.override_interlace_mode = ws_it->override_interlace_mode;
++
++	u32 converted = 0;
++	for (const PatchCommand& cmd : ws_it->patches)
++	{
++		// BYTES_T owns a heap buffer and never carries aspect floats; bail
++		// instead of guessing.
++		if (cmd.type == BYTES_T)
++			return;
++
++		PatchCommand copy;
++		copy.placetopatch = cmd.placetopatch;
++		copy.cpu = cmd.cpu;
++		copy.type = cmd.type;
++		copy.addr = cmd.addr;
++		copy.data = cmd.data;
++
++		u32 out = 0;
++		if (cmd.cpu == CPU_EE &&
++			(cmd.type == WORD_T || (cmd.type == EXTENDED_T && (cmd.addr >> 28) == 2)) &&
++			ConvertWSWordToUW(static_cast<u32>(cmd.data), &out))
++		{
++			copy.data = out;
++			converted++;
++		}
++
++		uw.patches.push_back(std::move(copy));
++	}
++
++	if (converted == 0)
++		return;
++
++	Console.WriteLn(Color_Green,
++		fmt::format("Synthesized '{}' from '{}' ({}/{} values rescaled).",
++			UW_PATCH_NAME, WS_PATCH_NAME, converted, uw.patches.size()));
++	patch_list->push_back(std::move(uw));
++}
++
+ void Patch::ReloadPatches(const std::string& serial, u32 crc, bool reload_files, bool reload_enabled_list, bool verbose,
+ 	bool verbose_if_changed)
+ {
+@@ -745,6 +865,7 @@ void Patch::ReloadPatches(const std::string& serial, u32 crc, bool reload_files,
+ 				if (patch_count > 0)
+ 					Console.WriteLn(Color_Green, fmt::format("Found {} game patches in {}.", patch_count, filename));
+ 			});
++		SynthesizeUltrawidePatches(&s_game_patches);
+ 
+ 		s_cheat_patches.clear();
+ 		EnumeratePnachFiles(
+@@ -1183,7 +1304,7 @@ u32 Patch::GetAllActivePatchesCount()
  
  bool Patch::IsGloballyToggleablePatch(const PatchInfo& patch_info)
  {
