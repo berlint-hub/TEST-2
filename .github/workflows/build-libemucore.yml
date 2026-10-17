@@ -1,0 +1,140 @@
+# Build a self-compiled libemucore.so (PS2 emulation core) for AetherSX2 /
+# NetherSX2-classic, using the AetherSX2 LGPL sources provided by Tahlreth.
+#
+# The output is the same native library the Android app loads at runtime
+# (JNI surface: xyz.aethersx2.android.NativeLibrary). Optionally repacks it
+# into a NetherSX2-classic APK and signs it.
+#
+# Sources:  https://github.com/Trixarian/AetherSX2        (LGPL core + closed libAetherSX2.a)
+# Target:   https://github.com/Trixarian/NetherSX2-classic (AetherSX2 3668 based app)
+
+name: Build libemucore.so
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: "GitHub repo with the AetherSX2 LGPL sources"
+        default: "Trixarian/AetherSX2"
+        required: true
+      source_ref:
+        description: "Git ref (branch/tag/SHA) of the source repo"
+        default: "main"
+        required: true
+      build_type:
+        description: "CMake build type"
+        default: "Release"
+        required: true
+      nethersx2_tag:
+        description: "NetherSX2-classic release tag to repack into an APK (empty = only build the .so)"
+        default: ""
+        required: false
+  push:
+    branches:
+      - main
+      - "arena/**"
+    paths:
+      - ".github/workflows/build-libemucore.yml"
+      - "libemucore-ci/**"
+
+concurrency:
+  group: build-libemucore-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # NDK 23.1.7779620 == r23b, the toolchain the original library was verified with.
+  NDK_VERSION: r23b
+  ANDROID_PLATFORM: android-26
+  ANDROID_ABI: arm64-v8a
+
+jobs:
+  build-core:
+    name: Build libemucore.so
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout this repo (scripts)
+        uses: actions/checkout@v4
+
+      - name: Setup Android NDK ${{ env.NDK_VERSION }}
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r23b
+          add-to-path: false
+
+      - name: Fetch AetherSX2 LGPL sources
+        env:
+          SOURCE_REPO: ${{ inputs.source_repo || 'Trixarian/AetherSX2' }}
+          SOURCE_REF: ${{ inputs.source_ref || 'main' }}
+        run: |
+          set -euo pipefail
+          git init aethersx2-src
+          git -C aethersx2-src remote add origin "https://github.com/${SOURCE_REPO}.git"
+          git -C aethersx2-src fetch --depth 1 origin "${SOURCE_REF}"
+          git -C aethersx2-src checkout --detach FETCH_HEAD
+          git -C aethersx2-src log -1 --oneline
+          test -f aethersx2-src/aethersx2/CMakeLists.txt
+          test -f aethersx2-src/aethersx2/pcsx2/libAetherSX2.a
+
+      - name: Configure (CMake + Android toolchain)
+        env:
+          BUILD_TYPE: ${{ inputs.build_type || 'Release' }}
+          NDK_PATH: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          cmake -S aethersx2-src/aethersx2 -B build-android \
+            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+            -DCMAKE_TOOLCHAIN_FILE="${NDK_PATH}/build/cmake/android.toolchain.cmake" \
+            -DANDROID_PLATFORM="${ANDROID_PLATFORM}" \
+            -DANDROID_ABI="${ANDROID_ABI}" \
+            -DNO_TRANSLATION=ON
+
+      - name: Build
+        run: cmake --build build-android --parallel "$(nproc)"
+
+      - name: Verify JNI surface
+        run: |
+          ls -la build-android/pcsx2/libemucore.so
+          python3 libemucore-ci/scripts/verify_so.py \
+            build-android/pcsx2/libemucore.so \
+            libemucore-ci/scripts/expected_exports.txt
+
+      - name: Upload libemucore.so
+        uses: actions/upload-artifact@v4
+        with:
+          name: libemucore-so
+          path: build-android/pcsx2/libemucore.so
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Download NetherSX2-classic APK
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.nethersx2_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NSX2_TAG: ${{ inputs.nethersx2_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "${NSX2_TAG}" \
+            -R Trixarian/NetherSX2-classic \
+            -p "*.apk" -D dist
+          ls -la dist
+
+      - name: Repack APK with the self-built core
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.nethersx2_tag != '' }}
+        run: |
+          set -euo pipefail
+          INPUT_APK="$(ls dist/*.apk | head -1)"
+          OUT="dist/$(basename "${INPUT_APK%.apk}")-custom-core.apk"
+          bash libemucore-ci/scripts/inject_and_sign.sh \
+            "${INPUT_APK}" build-android/pcsx2/libemucore.so "${OUT}"
+          ls -la dist
+
+      - name: Upload repacked APK
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.nethersx2_tag != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nethersx2-custom-core-apk
+          path: dist/*.apk
+          if-no-files-found: error
+          retention-days: 14

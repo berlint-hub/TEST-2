@@ -13,3 +13,7 @@
 /vulkan/
 /nxvk-sdk/
 Lossless.dll
+
+# Python bytecode
+__pycache__/
+*.pyc
