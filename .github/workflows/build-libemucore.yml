@@ -49,6 +49,8 @@ env:
   CMAKE_VERSION: "3.31.6"
   ANDROID_PLATFORM: android-26
   ANDROID_ABI: arm64-v8a
+  # Push builds always produce a ready-to-install APK from this release tag.
+  DEFAULT_NSX2_TAG: "2.2n"
 
 jobs:
   build-core:
@@ -131,10 +133,10 @@ jobs:
           retention-days: 14
 
       - name: Download NetherSX2-classic APK
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.nethersx2_tag != '' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.nethersx2_tag != '') || github.event_name == 'push' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          NSX2_TAG: ${{ inputs.nethersx2_tag }}
+          NSX2_TAG: ${{ inputs.nethersx2_tag || env.DEFAULT_NSX2_TAG }}
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -144,7 +146,7 @@ jobs:
           ls -la dist
 
       - name: Repack APK with the self-built core
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.nethersx2_tag != '' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.nethersx2_tag != '') || github.event_name == 'push' }}
         run: |
           set -euo pipefail
           INPUT_APK="$(ls dist/*.apk | head -1)"
@@ -154,7 +156,7 @@ jobs:
           ls -la dist
 
       - name: Upload repacked APK
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.nethersx2_tag != '' }}
+        if: ${{ (github.event_name == 'workflow_dispatch' && inputs.nethersx2_tag != '') || github.event_name == 'push' }}
         uses: actions/upload-artifact@v7
         with:
           name: nethersx2-custom-core-apk
