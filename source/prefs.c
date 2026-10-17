@@ -216,6 +216,9 @@ static void prefs_seed_defaults(void) {
   // fastCDVD DISABLED (also forced false in main.c): it breaks CDVD command timing
   // and hangs games in sceCdInit's cdvdfsv RPC bind. Disc reads work without it.
   prefs_seed("EmuCore/Speedhacks/fastCDVD", "false");
+  // XGKICK skip gate (GT3, patches.c): default ON = verified behavior (+10-15% FPS).
+  // Toggle via ini (EmuCore/Patches/XGKickSkip=false) + restart for A/B testing.
+  prefs_seed("EmuCore/Patches/XGKickSkip", "true");
 
   // Core's own logging, all off for release: the EE/IOP console + verbose paths
   // format many strings per frame and each line hits an SD-backed log, capping
