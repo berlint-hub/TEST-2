@@ -41,10 +41,12 @@ Trixarian/AetherSX2 (LGPL drop od Tahlretha)
 
 Push do branchů `main`/`arena/**` se změnou těchto souborů buildne `.so` automaticky (bez repack kroku).
 
-Poznámky k buildu (ověřeno na oficiálním dropu):
-- Android větve CMake je soběstačná — všechny knihovny jsou vendorované v `3rdparty/`, host potřebuje jen CMake + NDK + ninja/make.
+Poznámky k buildu (ověřeno lokální replikací konfigurace):
+- Android větve CMake je soběstačná — všechny knihovny jsou vendorované v `3rdparty/`, host potřebuje jen CMake + NDK.
 - Použitý NDK je pinované na **r23b (23.1.7779620)** — přesně konfigurace, se kterou Tahlreth ověřil reprodukovatelnost (jiná konfigurace nemá záruku funkčnosti).
-- Submoduly se **neinicializují** — obsah je v repu přímo.
+- **CMake se pinuje na 3.31.6** — drop je z éry CMake 3.x a `3rdparty/oboe` má `cmake_minimum_required(VERSION 3.4.1)`, které CMake 4.x odmítá (`Compatibility with CMake < 3.5 has been removed`).
+- **Dochází `3rdparty/cpuinfo/deps/clog`** — nested submodul cpuinfo, který se do tarballu nedostal; workflow ho proto doklonuje z `pytorch/cpuinfo`.
+- Submoduly se **neinicializují** — zbytek obsahu je v repu přímo.
 - Výstup je `build-android/pcsx2/libemucore.so` (`OUTPUT_NAME "emucore"`).
 
 ## Instalace APK s vlastním jádrem

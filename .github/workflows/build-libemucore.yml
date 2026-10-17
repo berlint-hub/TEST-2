@@ -44,6 +44,9 @@ concurrency:
 env:
   # NDK 23.1.7779620 == r23b, the toolchain the original library was verified with.
   NDK_VERSION: r23b
+  # The LGPL tree predates CMake 4 (3rdparty/oboe declares cmake_minimum_required 3.4.1,
+  # which CMake 4 refuses to process). Pin the last CMake 3.x line.
+  CMAKE_VERSION: "3.31.6"
   ANDROID_PLATFORM: android-26
   ANDROID_ABI: arm64-v8a
 
@@ -54,7 +57,7 @@ jobs:
     timeout-minutes: 120
     steps:
       - name: Checkout this repo (scripts)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Android NDK ${{ env.NDK_VERSION }}
         id: setup-ndk
@@ -62,6 +65,12 @@ jobs:
         with:
           ndk-version: r23b
           add-to-path: false
+
+      - name: Setup CMake ${{ env.CMAKE_VERSION }}
+        run: |
+          set -euo pipefail
+          python3 -m pip install "cmake==${CMAKE_VERSION}"
+          python3 -m cmake --version
 
       - name: Fetch AetherSX2 LGPL sources
         env:
@@ -77,12 +86,26 @@ jobs:
           test -f aethersx2-src/aethersx2/CMakeLists.txt
           test -f aethersx2-src/aethersx2/pcsx2/libAetherSX2.a
 
+      - name: Patch missing cpuinfo dependency (clog)
+        run: |
+          set -euo pipefail
+          # The LGPL drop is missing 3rdparty/cpuinfo/deps/clog (a nested git
+          # submodule of cpuinfo that did not make it into the tarball).
+          CLOG_DST="aethersx2-src/aethersx2/3rdparty/cpuinfo/deps/clog"
+          if [ ! -f "${CLOG_DST}/CMakeLists.txt" ]; then
+            git clone --depth 1 https://github.com/pytorch/cpuinfo /tmp/cpuinfo-up
+            mkdir -p "$(dirname "${CLOG_DST}")"
+            cp -r /tmp/cpuinfo-up/deps/clog "${CLOG_DST}"
+          fi
+          test -f "${CLOG_DST}/CMakeLists.txt"
+          echo "clog in place"
+
       - name: Configure (CMake + Android toolchain)
         env:
           BUILD_TYPE: ${{ inputs.build_type || 'Release' }}
           NDK_PATH: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
-          cmake -S aethersx2-src/aethersx2 -B build-android \
+          python3 -m cmake -S aethersx2-src/aethersx2 -B build-android \
             -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
             -DCMAKE_TOOLCHAIN_FILE="${NDK_PATH}/build/cmake/android.toolchain.cmake" \
             -DANDROID_PLATFORM="${ANDROID_PLATFORM}" \
@@ -90,7 +113,7 @@ jobs:
             -DNO_TRANSLATION=ON
 
       - name: Build
-        run: cmake --build build-android --parallel "$(nproc)"
+        run: python3 -m cmake --build build-android --parallel "$(nproc)"
 
       - name: Verify JNI surface
         run: |
@@ -100,7 +123,7 @@ jobs:
             libemucore-ci/scripts/expected_exports.txt
 
       - name: Upload libemucore.so
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: libemucore-so
           path: build-android/pcsx2/libemucore.so
@@ -132,9 +155,23 @@ jobs:
 
       - name: Upload repacked APK
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.nethersx2_tag != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nethersx2-custom-core-apk
           path: dist/*.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Report failure details
+        if: failure()
+        run: |
+          # Surface the configure/compile error as a workflow annotation so it
+          # is visible in the checks UI without downloading full logs.
+          for f in build-android/CMakeFiles/CMakeError.log \
+                   build-android/CMakeFiles/CMakeConfigureLog.yaml; do
+            if [ -f "$f" ]; then
+              MSG="$(tail -c 3000 "$f" | tr '\n' '|' | cut -c1-3000)"
+              echo "::error::tail of ${f}: ${MSG}"
+            fi
+          done
+          echo "::error::build failed — see the step log above for the full error"
